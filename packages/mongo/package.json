@@ -1,5 +1,5 @@
 {
-  "name": "@bb/config",
+  "name": "@bb/mongo",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
+    "@bb/config": "workspace:*",
+    "@bb/errors": "workspace:*",
     "@bb/types": "workspace:*",
-    "zod": "^4.3.6"
+    "mongodb": "^7.2.0"
   }
 }

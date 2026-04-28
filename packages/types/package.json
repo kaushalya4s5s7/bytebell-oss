@@ -1,5 +1,5 @@
 {
-  "name": "@bb/config",
+  "name": "@bb/types",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,8 +8,5 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "dependencies": {
-    "@bb/types": "workspace:*",
-    "zod": "^4.3.6"
-  }
+  "dependencies": {}
 }

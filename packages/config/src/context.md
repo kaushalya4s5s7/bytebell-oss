@@ -11,25 +11,25 @@ package-level contract; this file documents how the source tree is split.
   cache-invalidator registry. Holds the `testHomeOverride` state used by
   `__setBytebellHomeForTests`. Pure: imports nothing from the rest of the
   package.
-- **[schema.ts](schema.ts)** — Zod `configSchema`, `Config` enum,
-  `BytebellConfig` type, `ConfigValueMap`, `DEFAULT_CONFIG`, `REQUIRED_KEYS`,
-  `HINTS`, and the `readField` / `writeField` switch helpers.
+- **[schema.ts](schema.ts)** — Zod `configSchema`, `BytebellConfig` type,
+  `ConfigValueMap`, `DEFAULT_CONFIG`, `REQUIRED_KEYS`, `HINTS`, and the
+  `readField` / `writeField` switch helpers. Imports the `Config` enum from
+  `@bb/types` and re-exports it for intra-package convenience.
 - **[loader.ts](loader.ts)** — `loadConfig` (memoized), `getConfigValue`,
   `isConfigComplete`. Subscribes to the cache invalidator on module load.
 - **[writer.ts](writer.ts)** — `ensureBytebellHome`, `setConfigValue`, atomic
   `tmp → fsync → rename` write. Notifies the invalidator after a successful
   write.
-- **[errors.ts](errors.ts)** — `ConfigIncompleteError`. Type-only import of
-  `Config`.
+
+`ConfigIncompleteError` lives in `@bb/errors`, not here.
 
 ## Module dependency graph
 
 ```
-errors.ts → schema.ts (type only)
 loader.ts → schema.ts, paths.ts, writer.ts
 writer.ts → schema.ts, paths.ts
 paths.ts  → (leaf — node:os, node:path)
-schema.ts → (leaf — zod)
+schema.ts → @bb/types (Config enum), zod
 index.ts  → re-exports from all above
 ```
 

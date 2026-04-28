@@ -1,19 +1,10 @@
 import { z } from "zod";
+import { Config } from "@bb/types";
 
-export enum Config {
-  ServerPort = "server_port",
-  MongoUri = "mongo_uri",
-  Neo4jUri = "neo4j_uri",
-  Neo4jUser = "neo4j_user",
-  Neo4jPassword = "neo4j_password",
-  RedisUrl = "redis_url",
-  OpenrouterApiKey = "openrouter_api_key",
-  OpenrouterModel = "openrouter_model",
-  ConcurrencyPdf = "concurrency.pdf",
-  ConcurrencyWebsite = "concurrency.website",
-  ConcurrencyGithub = "concurrency.github",
-  ConcurrencyBitbucket = "concurrency.bitbucket",
-}
+export { Config };
+
+export const LOG_LEVELS = ["error", "warn", "info", "http", "verbose", "debug", "silly"] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
 
 const concurrencySchema = z
   .object({
@@ -35,6 +26,8 @@ export const configSchema = z
     openrouter_api_key: z.string().default(""),
     openrouter_model: z.string().default("anthropic/claude-sonnet-4.6"),
     concurrency: concurrencySchema.default({ pdf: 2, website: 2, github: 2, bitbucket: 2 }),
+    log_level: z.enum(LOG_LEVELS).default("info"),
+    log_retention_days: z.number().int().positive().default(14),
   })
   .strict();
 
@@ -55,6 +48,8 @@ export type ConfigValueMap = {
   [Config.ConcurrencyWebsite]: number;
   [Config.ConcurrencyGithub]: number;
   [Config.ConcurrencyBitbucket]: number;
+  [Config.LogLevel]: LogLevel;
+  [Config.LogRetentionDays]: number;
 };
 
 export type ConfigValue<K extends Config> = ConfigValueMap[K];
@@ -81,6 +76,8 @@ export const HINTS: Readonly<Record<Config, string>> = {
   [Config.ConcurrencyWebsite]: "bytebell set concurrency.website <n>",
   [Config.ConcurrencyGithub]: "bytebell set concurrency.github <n>",
   [Config.ConcurrencyBitbucket]: "bytebell set concurrency.bitbucket <n>",
+  [Config.LogLevel]: "bytebell set log-level <error|warn|info|debug>",
+  [Config.LogRetentionDays]: "bytebell set log-retention-days <n>",
 };
 
 export function readField<K extends Config>(cfg: BytebellConfig, key: K): ConfigValue<K> {
@@ -109,6 +106,10 @@ export function readField<K extends Config>(cfg: BytebellConfig, key: K): Config
       return cfg.concurrency.github as ConfigValue<K>;
     case Config.ConcurrencyBitbucket:
       return cfg.concurrency.bitbucket as ConfigValue<K>;
+    case Config.LogLevel:
+      return cfg.log_level as ConfigValue<K>;
+    case Config.LogRetentionDays:
+      return cfg.log_retention_days as ConfigValue<K>;
   }
 }
 
@@ -138,5 +139,9 @@ export function writeField<K extends Config>(cfg: BytebellConfig, key: K, value:
       return { ...cfg, concurrency: { ...cfg.concurrency, github: value as number } };
     case Config.ConcurrencyBitbucket:
       return { ...cfg, concurrency: { ...cfg.concurrency, bitbucket: value as number } };
+    case Config.LogLevel:
+      return { ...cfg, log_level: value as LogLevel };
+    case Config.LogRetentionDays:
+      return { ...cfg, log_retention_days: value as number };
   }
 }

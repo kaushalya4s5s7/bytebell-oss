@@ -1,4 +1,4 @@
-import type { Config } from "./schema.ts";
+import type { Config } from "@bb/types";
 
 export class ConfigIncompleteError extends Error {
   override readonly name = "ConfigIncompleteError";

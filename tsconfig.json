@@ -7,5 +7,11 @@
     "noEmit": true
   },
   "files": [],
-  "references": [{ "path": "packages/config" }]
+  "references": [
+    { "path": "packages/types" },
+    { "path": "packages/errors" },
+    { "path": "packages/config" },
+    { "path": "packages/logger" },
+    { "path": "packages/mongo" }
+  ]
 }

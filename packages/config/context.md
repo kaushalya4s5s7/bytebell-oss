@@ -23,7 +23,8 @@ This package does **not** read from `process.env` and never will.
 ## Public exports
 
 ```ts
-enum Config { ... }
+type LogLevel
+const LOG_LEVELS: readonly LogLevel[]
 interface BytebellConfig
 type ConfigValue<K extends Config>
 type ConfigValueMap
@@ -37,9 +38,17 @@ function getBytebellHome(): string
 function getConfigPath(): string
 function ensureBytebellHome(): void
 
-class ConfigIncompleteError extends Error
 function __setBytebellHomeForTests(home: string | null): void  // test-only
 ```
+
+The `Config` enum lives in `@bb/types`; `ConfigIncompleteError` lives in
+`@bb/errors`. Both are imported from those packages directly, not from
+`@bb/config`.
+
+Config keys (v0): `server_port`, `mongo_uri`, `neo4j_uri`, `neo4j_user`,
+`neo4j_password`, `redis_url`, `openrouter_api_key`, `openrouter_model`,
+`concurrency.{pdf,website,github,bitbucket}`, `log_level`,
+`log_retention_days`.
 
 Anything not in this list is internal — do not import from subpaths.
 
