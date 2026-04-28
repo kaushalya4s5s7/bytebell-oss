@@ -18,13 +18,21 @@ package-level contract; this file documents how the source tree is split.
   the URI via the local `redactUri` helper), `MongoNotConnectedError`
   (`_getDb()` called before `connectMongo()`). Local helpers `describe` and
   `redactUri` are file-private.
+- **[redis-errors.ts](redis-errors.ts)** — errors thrown by `@bb/redis`.
+  Today: `RedisConfigError` (missing URL; carries the `bytebell set …`
+  hint), `RedisConnectError` (ioredis connect failed; redacts userinfo via
+  the local `redactUri` helper — the regex matches `redis://user:pass@host`
+  identically to the mongo URI form), `RedisNotConnectedError`
+  (`_getRedis()` called before `connectRedis()`). Local helpers `describe`
+  and `redactUri` are file-private.
 
 ## Module dependency graph
 
 ```
 config-errors.ts → @bb/types (type-only: Config)
 mongo-errors.ts  → (leaf — no imports)
-index.ts         → re-exports both error modules
+redis-errors.ts  → (leaf — no imports)
+index.ts         → re-exports all three error modules
 ```
 
 No cross-file imports inside the package; no cycles possible.

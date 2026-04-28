@@ -20,9 +20,12 @@ Today the catalog covers:
 - **Mongo** — `MongoConfigError` (missing URI), `MongoConnectError` (driver
   connect failed; redacts credentials in URI), `MongoNotConnectedError`
   (`_getDb()` called before `connectMongo()`)
+- **Redis** — `RedisConfigError` (missing URL), `RedisConnectError` (ioredis
+  connect failed; redacts userinfo in URL), `RedisNotConnectedError`
+  (`_getRedis()` called before `connectRedis()`)
 
-New error classes land here as new packages are introduced (Neo4j, Redis,
-queue, ingest, llm, license, etc.).
+New error classes land here as new packages are introduced (Neo4j, queue,
+ingest, llm, license, etc.).
 
 ## Public exports
 
@@ -31,6 +34,9 @@ class ConfigIncompleteError    extends Error
 class MongoConfigError         extends Error
 class MongoConnectError        extends Error
 class MongoNotConnectedError   extends Error
+class RedisConfigError         extends Error
+class RedisConnectError        extends Error
+class RedisNotConnectedError   extends Error
 ```
 
 ## Data ownership
