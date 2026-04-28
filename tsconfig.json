@@ -7,5 +7,5 @@
     "noEmit": true
   },
   "files": [],
-  "references": []
+  "references": [{ "path": "packages/config" }]
 }
