@@ -96,7 +96,7 @@ GET  /api/v1/repos            → 200 { repos: [...] }   (sorted updatedAt desc)
    `setKnowledgeState(_, QUEUED)` then transitions the doc.
    3a. **Neo4j schema bootstrap runs once at boot.** `ensureKnowledgeIndexes`
    creates uniqueness constraints for `:Knowledge / :File / :Keyword /
- :Class / :Function / :Module`; tolerant of existing indexes.
+:Class / :Function / :Module`; tolerant of existing indexes.
 4. **Local ingest copies into `repos/`, not in-place.** The user's
    `sourcePath` is read-only; the canonical home for ingested files is
    `~/.bytebell/repos/<knowledgeId>/`. Future MCP retrieval reads from
