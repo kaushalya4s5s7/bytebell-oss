@@ -1,0 +1,144 @@
+# `@bb/mongo` — context
+
+## Tier
+
+Infrastructure. Depends on Kernel (`@bb/types` for `Config` and
+`KnowledgeState`, `@bb/errors` for typed error classes) and on infra
+siblings explicitly listed in `package.json` (`@bb/config` for
+`Config.MongoUri`). May be imported by Strategy (`@bb/queue`), Domain,
+and Binaries — never by `@bb/cli` (CLI talks HTTP only).
+
+## Responsibility
+
+The package owns:
+
+- A single shared `MongoClient` (lazy, idempotent connect; graceful close)
+- A health probe (`pingMongo`) backed by the active connection
+- An internal `_getDb()` accessor that typed collection helpers in this
+  package compose against
+- Domain CRUD helpers:
+  - `setKnowledgeState` — the knowledge-document state mutator. Called
+    by `@bb/queue` publishers on enqueue.
+  - `upsertRawFile` — per-file Raw doc writer (compound key
+    `{ knowledgeId, relativePath }`). Called by `@bb/ingest-github`'s
+    worker for every scanned file.
+- A central registry of collection name strings (`Collections` enum)
+
+The package does **not** own:
+
+- Knowledge-document creation, full reads, or any mutation other than the
+  state field (deferred — see _How to extend_)
+- Document schemas (live in `@bb/types`)
+- Index management (deferred)
+- Neo4j / graph queries (`@bb/graph`)
+- Telemetry, logging, retry policies (the driver handles transport retries)
+
+## Public exports
+
+```ts
+function connectMongo(): Promise<void>;
+function closeMongo(): Promise<void>;
+function pingMongo(): Promise<PingResult>;
+
+function setKnowledgeState(knowledgeId: string, state: KnowledgeState): Promise<void>;
+function upsertRawFile(doc: Omit<RawFileDoc, "updatedAt">): Promise<void>;
+
+interface PingResult {
+  ok: boolean;
+  latencyMs: number;
+}
+interface FileAnalysis {
+  purpose: string;
+  summary: string;
+  classes: string[];
+  functions: string[];
+  imports: string[];
+  keywords: string[];
+}
+interface RawFileDoc {
+  knowledgeId: string;
+  relativePath: string;
+  content: string;
+  sha: string;
+  sizeBytes: number;
+  language: string;
+  analysis: FileAnalysis;
+  updatedAt: Date;
+}
+```
+
+(`MongoConfigError`, `MongoConnectError`, `MongoNotConnectedError`,
+`KnowledgeNotFoundError` are thrown by these functions but **defined in
+`@bb/errors`** — import them from there.)
+
+`RawFileDoc` and `FileAnalysis` are package-local for now; they'll
+graduate to `@bb/types` when a second consumer (e.g. `@bb/mcp` retrieval)
+needs to read Raw docs.
+
+`_getDb()` and the `Collections` enum are **internal** — consumed only
+by helpers inside this package. Higher tiers cannot reach a raw `Db`
+handle; they go through typed domain helpers that this package will
+expose as they are added.
+
+## Data ownership
+
+The single shared `MongoClient` instance. Document shapes, indexes, and
+migrations are intentionally not owned here.
+
+## Invariants
+
+1. **No env reads.** The Mongo URI comes from
+   `getConfigValue(Config.MongoUri)`. No `process.env`, no `.env`, no fallback.
+   Enforced repo-wide by [eslint.config.mjs:71-94](../../eslint.config.mjs#L71-L94).
+2. **`connectMongo()` is idempotent and concurrent-safe.** Repeated calls
+   return the existing client; concurrent calls await the same in-flight
+   connect promise.
+3. **`closeMongo()` is graceful.** Clears the cached client before awaiting
+   `client.close()` so a subsequent `connectMongo()` cleanly re-establishes.
+4. **Errors are typed, not strings.** `MongoConfigError` carries the exact
+   `bytebell set …` hint; `MongoConnectError` redacts credentials in the URI.
+5. **No raw `Db` leaks.** `_getDb()` is not in `src/index.ts`. The only way
+   higher tiers touch Mongo is through typed helpers exported from this
+   package.
+
+## External dependencies
+
+- `mongodb` — official driver
+- `@bb/config` — workspace dep, for `getConfigValue(Config.MongoUri)`
+- `@bb/types` — workspace dep, for `Config` and `KnowledgeState`
+- `@bb/errors` — workspace dep, for the typed error classes thrown here
+
+No logger, no telemetry, no Neo4j, no Redis. This package boots after
+`@bb/config` and before everything that needs persistence.
+
+## What is intentionally out of scope (v0)
+
+- Knowledge-document creation, deletion, or full reads
+  (`getKnowledgeById`, `createKnowledge`, etc.) — added when the first
+  caller arrives
+- Raw deletion / `deleteRawFile(knowledgeId, relativePath)` —
+  added when `github_pull` lands and needs to clean up files removed in
+  a diff
+- `Nodes` and `Jobs` collection helpers — deferred until callers need
+  them
+- Index creation / migrations
+- Transactions helper
+- Change streams, GridFS
+- Application-level retry / backoff (the driver handles transport retries)
+- A standalone "probe a candidate URI" helper for the setup form (added when
+  `@bb/cli`'s setup form lands)
+
+## How to extend
+
+Adding a new CRUD helper (e.g. `getKnowledgeById`):
+
+1. Pick or create the appropriate `Collections` enum entry in
+   `src/collections.ts` (single source of truth for collection names).
+2. Create `src/<name>.ts` (flat — repo ESLint forbids parent traversal,
+   so subdirectories require import gymnastics; keep `src/` flat).
+3. Use `_getDb()` to obtain the `Db` handle and access the named
+   collection — never expose the raw `Db` to callers.
+4. Return / accept domain types from `@bb/types`. Throw typed errors
+   from `@bb/errors`.
+5. Re-export the helper from `src/index.ts`.
+6. Update the _Public exports_ and _Out of scope_ sections of this file.

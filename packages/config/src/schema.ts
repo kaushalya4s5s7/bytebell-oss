@@ -1,0 +1,147 @@
+import { z } from "zod";
+import { Config } from "@bb/types";
+
+export { Config };
+
+export const LOG_LEVELS = ["error", "warn", "info", "http", "verbose", "debug", "silly"] as const;
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+const concurrencySchema = z
+  .object({
+    pdf: z.number().int().positive().default(2),
+    website: z.number().int().positive().default(2),
+    github: z.number().int().positive().default(2),
+    bitbucket: z.number().int().positive().default(2),
+  })
+  .strict();
+
+export const configSchema = z
+  .object({
+    server_port: z.number().int().min(1).max(65535).default(8080),
+    mongo_uri: z.string().default(""),
+    neo4j_uri: z.string().default(""),
+    neo4j_user: z.string().default(""),
+    neo4j_password: z.string().default(""),
+    redis_url: z.string().default(""),
+    openrouter_api_key: z.string().default(""),
+    openrouter_model: z.string().default("anthropic/claude-sonnet-4.6"),
+    concurrency: concurrencySchema.default({ pdf: 2, website: 2, github: 2, bitbucket: 2 }),
+    log_level: z.enum(LOG_LEVELS).default("info"),
+    log_retention_days: z.number().int().positive().default(14),
+  })
+  .strict();
+
+export type BytebellConfig = z.infer<typeof configSchema>;
+
+export const DEFAULT_CONFIG: BytebellConfig = configSchema.parse({});
+
+export type ConfigValueMap = {
+  [Config.ServerPort]: number;
+  [Config.MongoUri]: string;
+  [Config.Neo4jUri]: string;
+  [Config.Neo4jUser]: string;
+  [Config.Neo4jPassword]: string;
+  [Config.RedisUrl]: string;
+  [Config.OpenrouterApiKey]: string;
+  [Config.OpenrouterModel]: string;
+  [Config.ConcurrencyPdf]: number;
+  [Config.ConcurrencyWebsite]: number;
+  [Config.ConcurrencyGithub]: number;
+  [Config.ConcurrencyBitbucket]: number;
+  [Config.LogLevel]: LogLevel;
+  [Config.LogRetentionDays]: number;
+};
+
+export type ConfigValue<K extends Config> = ConfigValueMap[K];
+
+export const REQUIRED_KEYS: readonly Config[] = [
+  Config.MongoUri,
+  Config.Neo4jUri,
+  Config.Neo4jUser,
+  Config.Neo4jPassword,
+  Config.RedisUrl,
+  Config.OpenrouterApiKey,
+];
+
+export const HINTS: Readonly<Record<Config, string>> = {
+  [Config.ServerPort]: "bytebell set port <n>",
+  [Config.MongoUri]: "bytebell set mongo <uri>",
+  [Config.Neo4jUri]: "bytebell set neo4j <uri>",
+  [Config.Neo4jUser]: "bytebell set neo4j-user <user>",
+  [Config.Neo4jPassword]: "bytebell set neo4j-password <pwd>",
+  [Config.RedisUrl]: "bytebell set redis <url>",
+  [Config.OpenrouterApiKey]: "bytebell keys set",
+  [Config.OpenrouterModel]: "bytebell models set <model-id>",
+  [Config.ConcurrencyPdf]: "bytebell set concurrency.pdf <n>",
+  [Config.ConcurrencyWebsite]: "bytebell set concurrency.website <n>",
+  [Config.ConcurrencyGithub]: "bytebell set concurrency.github <n>",
+  [Config.ConcurrencyBitbucket]: "bytebell set concurrency.bitbucket <n>",
+  [Config.LogLevel]: "bytebell set log-level <error|warn|info|debug>",
+  [Config.LogRetentionDays]: "bytebell set log-retention-days <n>",
+};
+
+export function readField<K extends Config>(cfg: BytebellConfig, key: K): ConfigValue<K> {
+  switch (key) {
+    case Config.ServerPort:
+      return cfg.server_port as ConfigValue<K>;
+    case Config.MongoUri:
+      return cfg.mongo_uri as ConfigValue<K>;
+    case Config.Neo4jUri:
+      return cfg.neo4j_uri as ConfigValue<K>;
+    case Config.Neo4jUser:
+      return cfg.neo4j_user as ConfigValue<K>;
+    case Config.Neo4jPassword:
+      return cfg.neo4j_password as ConfigValue<K>;
+    case Config.RedisUrl:
+      return cfg.redis_url as ConfigValue<K>;
+    case Config.OpenrouterApiKey:
+      return cfg.openrouter_api_key as ConfigValue<K>;
+    case Config.OpenrouterModel:
+      return cfg.openrouter_model as ConfigValue<K>;
+    case Config.ConcurrencyPdf:
+      return cfg.concurrency.pdf as ConfigValue<K>;
+    case Config.ConcurrencyWebsite:
+      return cfg.concurrency.website as ConfigValue<K>;
+    case Config.ConcurrencyGithub:
+      return cfg.concurrency.github as ConfigValue<K>;
+    case Config.ConcurrencyBitbucket:
+      return cfg.concurrency.bitbucket as ConfigValue<K>;
+    case Config.LogLevel:
+      return cfg.log_level as ConfigValue<K>;
+    case Config.LogRetentionDays:
+      return cfg.log_retention_days as ConfigValue<K>;
+  }
+}
+
+export function writeField<K extends Config>(cfg: BytebellConfig, key: K, value: ConfigValue<K>): BytebellConfig {
+  switch (key) {
+    case Config.ServerPort:
+      return { ...cfg, server_port: value as number };
+    case Config.MongoUri:
+      return { ...cfg, mongo_uri: value as string };
+    case Config.Neo4jUri:
+      return { ...cfg, neo4j_uri: value as string };
+    case Config.Neo4jUser:
+      return { ...cfg, neo4j_user: value as string };
+    case Config.Neo4jPassword:
+      return { ...cfg, neo4j_password: value as string };
+    case Config.RedisUrl:
+      return { ...cfg, redis_url: value as string };
+    case Config.OpenrouterApiKey:
+      return { ...cfg, openrouter_api_key: value as string };
+    case Config.OpenrouterModel:
+      return { ...cfg, openrouter_model: value as string };
+    case Config.ConcurrencyPdf:
+      return { ...cfg, concurrency: { ...cfg.concurrency, pdf: value as number } };
+    case Config.ConcurrencyWebsite:
+      return { ...cfg, concurrency: { ...cfg.concurrency, website: value as number } };
+    case Config.ConcurrencyGithub:
+      return { ...cfg, concurrency: { ...cfg.concurrency, github: value as number } };
+    case Config.ConcurrencyBitbucket:
+      return { ...cfg, concurrency: { ...cfg.concurrency, bitbucket: value as number } };
+    case Config.LogLevel:
+      return { ...cfg, log_level: value as LogLevel };
+    case Config.LogRetentionDays:
+      return { ...cfg, log_retention_days: value as number };
+  }
+}

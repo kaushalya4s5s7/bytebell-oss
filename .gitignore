@@ -54,3 +54,6 @@ coverage/
 
 # Docs
 docs/
+
+# claude personal settings
+.claude/
