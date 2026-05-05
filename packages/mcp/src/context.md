@@ -9,88 +9,169 @@ workspace keeps `src/` flat.
 
 ## Files
 
-- **[index.ts](index.ts)** — public re-export surface. Exposes
-  `mountMcp(app)` (idempotent registration of the four MCP HTTP routes
-  on a supplied Express app) and `closeAllMcpSessions()` (drains both
-  transport maps before the server shuts down). Owns a module-level
-  `mounted` guard so a second `mountMcp` call is a no-op. Wraps every
-  request handler in a `.catch()` that delegates to `sendError`, which
-  emits a JSON 500 only when headers are still pending.
-- **[server.ts](server.ts)** — `buildMcpServer()` constructs and
-  returns the single `McpServer` instance. Owns the constants
-  `SERVER_NAME = "bytebell-public"`, `SERVER_VERSION = "0.0.0"` (kept
-  in sync with `package.json` manually), and the short `INSTRUCTIONS`
-  string the SDK forwards in every initialize response. v1-step1 has
-  no tools or resources — they are registered by follow-up files
-  (`<tool>Tool.ts`, `resourcesSkills.ts`) that will plug in here.
+### Composition root
+
+- **[index.ts](index.ts)** — public surface. Exports `mountMcp(app)`
+  (idempotent registration of the four MCP HTTP routes plus `/sse` and
+  `/sse/messages`) and `closeAllMcpSessions()` (drains both transport
+  maps before shutdown). Owns the module-level `mounted` guard.
+- **[server.ts](server.ts)** — `buildMcpServer()` constructs the single
+  `McpServer` instance and invokes the four register functions in order
+  (smart_search, keyword_lookup, retrieve_file, skill resources). Owns
+  the `SERVER_NAME / SERVER_VERSION / INSTRUCTIONS` constants.
+
+### Transports
+
 - **[streamableHttpTransport.ts](streamableHttpTransport.ts)** — owns
-  the per-session `Map<string, StreamableHTTPServerTransport>` for the
-  modern transport. `handleStreamableHttp(req, res, server)` resolves
-  an existing transport by `mcp-session-id` header or, on POST
-  initialize requests, lazily constructs one whose
-  `sessionIdGenerator` mints a `randomUUID` and whose
-  `onsessioninitialized` registers the new id in the map. Each
-  transport's `onclose` removes itself from the map.
-  `closeAllStreamableHttpTransports()` drains the map and awaits
-  `transport.close()` on each entry via `Promise.allSettled` so a
-  single broken transport does not block shutdown.
-- **[sseTransport.ts](sseTransport.ts)** — legacy SSE transport.
-  `handleSseConnect` constructs a fresh `SSEServerTransport` per GET
-  to `/sse`, registers it under its SDK-minted `sessionId`, and wires
-  `res.on("close")` to drop the entry. `handleSseMessages` looks up
-  the transport by the `sessionId` query string and forwards the POST
-  body via `handlePostMessage`. Drain helper mirrors the streamable
-  drain.
+  the per-session map of `StreamableHTTPServerTransport`. Resolves
+  existing sessions by `mcp-session-id` header; lazily constructs new
+  ones on POST initialize. `as unknown as Transport` cast at the
+  `server.connect(...)` call works around an SDK typing mismatch under
+  `exactOptionalPropertyTypes`.
+- **[sseTransport.ts](sseTransport.ts)** — legacy SSE pair. GET `/sse`
+  opens a fresh transport; POST `/sse/messages?sessionId=…` looks it up
+  and forwards the body via `handlePostMessage`. Same Transport-cast
+  workaround as the streamable transport.
+
+### Tools
+
+- **[smartSearchTool.ts](smartSearchTool.ts)** — registers
+  `smart_search` via the modern `server.registerTool` API. Owns the
+  Zod schema, dispatch, parallel-channel orchestration, repo-name
+  attachment, pagination, and the JSON char-budget trim loop.
+- **[smartSearchChannels.ts](smartSearchChannels.ts)** — six
+  channel runners (purpose, paths, keywords, classes, functions,
+  imports). Each is one Cypher query that returns
+  `{path, knowledgeId, score}`. `escapeLucene` and `buildFulltextQuery`
+  helpers shared with `keywordLookupTool`. `CHANNEL_RUNNERS` map is
+  exported so the tool can iterate channels generically.
+- **[smartSearchFusion.ts](smartSearchFusion.ts)** — pure
+  in-memory fusion. `fuseHits` normalizes per-channel scores against
+  the channel max, applies fixed weights, dedupes, and accumulates
+  `matched_channels`. `attachRepoNames` runs a single Cypher to map
+  `knowledgeId → Knowledge.repoName`. `clusterByFolder` groups paths
+  by their first two path segments and returns clusters with
+  `file_count ≥ 2`.
+- **[searchExclusions.ts](searchExclusions.ts)** — fixed presets for
+  the six `exclude` categories (tests, vendor, config, generated,
+  docs, build). `EXCLUSION_WHERE` is the Cypher fragment every channel
+  embeds via template literal.
+- **[keywordLookupTool.ts](keywordLookupTool.ts)** — registers
+  `keyword_lookup`. The four `match` modes pick the right Cypher
+  template (fulltext + traversal for keyword/class/function; plain
+  `CONTAINS` over `Module.name` for module). Returned `name` carries
+  the full Class/Function `signature` string when applicable, so the
+  embedded line-range hint reaches the caller. Pagination packs
+  matched-entity entries until a ~5000-token char budget is hit.
+- **[retrieveFileTool.ts](retrieveFileTool.ts)** — registers
+  `retrieve_file`. Dispatches to one of three operation modules based
+  on the `operation` arg. `formatResult` does the line-numbered text
+  rendering for `content` / `content_search` results.
+- **[retrieveFileMetadata.ts](retrieveFileMetadata.ts)** — single
+  Cypher that joins `File` to its outgoing edges
+  (`HAS_KEYWORD`/`HAS_CLASS`/`HAS_FUNCTION`/`HAS_IMPORT`) and returns
+  the per-file metadata bundle plus a `notFound[]` list for paths
+  that did not resolve.
+- **[retrieveFileContent.ts](retrieveFileContent.ts)** — disk read
+  via `repoFs.readFileLines`, then either a line-range slice with
+  token-budget trim and `nextFromLine`, or a search-within-file pass
+  that returns each match plus surrounding `contextLines` of context.
+- **[retrieveFileBulk.ts](retrieveFileBulk.ts)** — parallel
+  `Promise.all` over the supplied `paths[]`, scanning each file for
+  the `search` term. Returns matched / noMatch / errored buckets;
+  `matchOnly: true` skips the context-line rendering.
+- **[repoFs.ts](repoFs.ts)** — local-clone resolution helpers.
+  `resolveCloneDir(knowledgeId)` returns
+  `<bytebellHome>/repos/{knowledgeId}`. `resolveFilePath` rejects
+  absolute paths, `..` components, and any resolved target outside the
+  clone root — a single anti-traversal guard reused by every disk-
+  reading helper. `readFileLines` returns the splitted lines;
+  `sliceLines` and `prefixWithLineNumbers` support content rendering.
+
+### Resources
+
+- **[resourcesSkills.ts](resourcesSkills.ts)** — registers
+  `bytebell://skills/index` and the
+  `bytebell://skills/{skillName}/{filename}` template. The bundled
+  `<package>/skills/` directory is located via `import.meta.url`.
+  `readSkillsIndex` rebuilds the index from disk on each request so
+  edits to bundled skill files take effect without a server restart.
+  Path resolution rejects any segment containing `/`, `\`, or a
+  leading `.` — the same anti-traversal posture as `repoFs`.
 
 ## Module dependency graph
 
 ```
-server.ts                    → @modelcontextprotocol/sdk/server/mcp.js
+server.ts                    → @modelcontextprotocol/sdk/server/mcp.js,
+                               smartSearchTool, keywordLookupTool,
+                               retrieveFileTool, resourcesSkills
+
 streamableHttpTransport.ts   → node:crypto, express (types only),
-                               @modelcontextprotocol/sdk/server/{mcp,streamableHttp}.js,
-                               @modelcontextprotocol/sdk/types.js
+                               @modelcontextprotocol/sdk/{server/mcp,server/streamableHttp,types,shared/transport}.js
 sseTransport.ts              → express (types only),
-                               @modelcontextprotocol/sdk/server/{mcp,sse}.js
+                               @modelcontextprotocol/sdk/{server/mcp,server/sse,shared/transport}.js
 index.ts                     → express (types only), server.ts,
-                               streamableHttpTransport.ts, sseTransport.ts
+                               streamableHttpTransport, sseTransport
+
+searchExclusions.ts          → (no deps)
+smartSearchChannels.ts       → @bb/neo4j (runCypher), searchExclusions
+smartSearchFusion.ts         → @bb/neo4j (runCypher), smartSearchChannels (types)
+smartSearchTool.ts           → zod, @modelcontextprotocol/sdk/server/mcp.js,
+                               smartSearchChannels, smartSearchFusion, searchExclusions
+
+keywordLookupTool.ts         → zod, @modelcontextprotocol/sdk/server/mcp.js,
+                               @bb/neo4j (runCypher), smartSearchChannels (escape helpers)
+
+retrieveFileTool.ts          → zod, @modelcontextprotocol/sdk/server/mcp.js,
+                               retrieveFileMetadata, retrieveFileContent, retrieveFileBulk
+retrieveFileMetadata.ts      → @bb/neo4j (runCypher)
+retrieveFileContent.ts       → repoFs
+retrieveFileBulk.ts          → repoFs
+repoFs.ts                    → node:fs/promises, node:path, @bb/config (getBytebellHome)
+
+resourcesSkills.ts           → node:fs, node:path, node:url,
+                               @modelcontextprotocol/sdk/server/mcp.js
 ```
 
-No cycles. Transport modules each own a private `Map`; `index.ts`
-composes them but does not reach inside.
+No cycles. Every read goes through `@bb/neo4j.runCypher` (graph) or
+`repoFs` (disk).
 
 ## Invariants enforced here
 
-- **`mountMcp` is idempotent.** A module-level `mounted` flag short-
-  circuits repeat calls. Tests that re-import the package must reset
-  via a fresh module instance, not by calling twice.
-- **One `McpServer` per process.** `buildMcpServer()` is called exactly
-  once, inside `mountMcp`. No global singleton — the instance is
-  captured in closures held by the route handlers.
-- **No express runtime dep.** Only types are imported (`import type {
-Application, Request, Response } from "express"`). The runtime
-  belongs to `@bb/server`.
-- **No non-null assertions, no `any`, no dynamic `import()`.**
-  Repo-wide strict-types rules apply — see CLAUDE.md.
-- **Errors never leak as unhandled rejections.** Every `async`
-  handler invocation in `index.ts` is `.catch()`-wrapped so an
-  unexpected throw becomes a JSON 500 (or, if headers are already
-  sent, a no-op).
+- **`mountMcp` is idempotent.** Module-level `mounted` flag in
+  `index.ts`.
+- **One `McpServer` per process.** Constructed once inside `mountMcp`,
+  captured by closures in route handlers.
+- **No express runtime dep.** Only types are imported.
+- **Tool input types echo `T | undefined`.** Required to bridge the
+  Zod-inferred shapes the SDK emits with our `exactOptionalPropertyTypes`
+  consumer side. Every optional field on `*Input` interfaces uses
+  `field?: T | undefined`.
+- **Disk reads are path-traversal safe.** `repoFs.resolveFilePath`
+  is the single gate; `retrieveFileContent` and `retrieveFileBulk`
+  must go through it.
+- **Errors never leak as unhandled rejections.** Every async route
+  handler in `index.ts` is `.catch()`-wrapped; tool handlers return
+  thrown errors as MCP error responses (the SDK wraps the throw).
 - **Transports are owned, not leaked.** Both transport modules wire
   `onclose` / `res.on("close")` to remove themselves from their map.
-  `closeAllMcpSessions` covers the rest at shutdown.
+  `closeAllMcpSessions` covers shutdown drain.
+- **No non-null assertions, no `any`, no dynamic `import()`.**
+  Repo-wide strict-types rules apply — see CLAUDE.md.
 
-## Adding a tool (planned)
+## Adding a tool
 
 1. Create `src/<toolName>Tool.ts` exporting
-   `register<ToolName>Tool(server: McpServer): void`.
-2. Call it inside `buildMcpServer()` after the `new McpServer(...)`
-   line and before the `return`.
-3. Wire any new infra dep (`@bb/neo4j`, `@bb/mongo`, `@bb/config`)
-   into `package.json` `dependencies`.
+   `register<ToolName>Tool(server: McpServer): void`. Use
+   `server.registerTool(name, { description, inputSchema }, cb)` (not
+   the deprecated `server.tool` overloads).
+2. Declare the input interface with `field?: T | undefined` for every
+   optional Zod field.
+3. Call the new register fn from `buildMcpServer()` in `server.ts`.
 4. Update _Files_ + _Module dependency graph_ in this context.
 
-## Adding a resource (planned)
+## Adding a resource
 
-1. Create `src/resources<Name>.ts` exporting
-   `register<Name>Resources(server: McpServer): void`.
-2. Same wiring as tools — call from inside `buildMcpServer()`.
+Same recipe as a tool — `src/resources<Name>.ts` with
+`register<Name>Resources(server: McpServer): void`, called from
+`buildMcpServer()`.

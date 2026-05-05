@@ -8,10 +8,11 @@ package-level contract; this file documents how the source tree is split.
 - **[index.ts](index.ts)** — public re-exports. The only entry point
   other packages may import. Exposes the lifecycle (`connectNeo4j`,
   `closeNeo4j`, `pingNeo4j`), schema bootstrap
-  (`ensureKnowledgeIndexes`), and typed graph helpers
-  (`upsertKnowledgeNode`, `setKnowledgeStateInGraph`, `upsertFileNode`),
-  plus the `PingResult` and `UpsertFileNodeInput` types. Anything not
-  re-exported here is internal.
+  (`ensureKnowledgeIndexes`), typed graph helpers (`upsertKnowledgeNode`,
+  `setKnowledgeStateInGraph`, `upsertFileNode`), and the public read
+  primitive `runCypher` (a re-export of the internal `_runCypher` for
+  domain-tier consumers). Plus the `PingResult` and `UpsertFileNodeInput`
+  types. Anything not re-exported here is internal.
 - **[client.ts](client.ts)** — module-scoped `Driver` singleton +
   lifecycle (`connectNeo4j`, `closeNeo4j`), the health probe (`pingNeo4j`,
   via `verifyConnectivity()`), the **internal** `_getDriver()` accessor

@@ -89,7 +89,11 @@
       "name": "@bb/mcp",
       "version": "0.0.0",
       "dependencies": {
+        "@bb/config": "workspace:*",
+        "@bb/neo4j": "workspace:*",
+        "@bb/types": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.23.0",
+        "zod": "^4.3.6",
       },
       "devDependencies": {
         "@types/express": "^5.0.6",

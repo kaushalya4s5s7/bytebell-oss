@@ -1,19 +1,28 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerSmartSearchTool } from "./smartSearchTool.ts";
+import { registerKeywordLookupTool } from "./keywordLookupTool.ts";
+import { registerRetrieveFileTool } from "./retrieveFileTool.ts";
+import { registerSkillResources } from "./resourcesSkills.ts";
 
 const SERVER_NAME = "bytebell-public";
 const SERVER_VERSION = "0.0.0";
 
 const INSTRUCTIONS = `Bytebell-public local knowledge graph.
 
-This server exposes a small, single-tenant MCP retrieval surface for code
-indexed locally by bytebell-server. Available tools (registered in
-follow-up steps): smart_search, keyword_lookup, retrieve_file. Available
-resources (registered in follow-up steps): bytebell://skills/index and
-bytebell://skills/{name}/{filename}.
+Three tools are registered: smart_search (default — fused six-channel
+search), keyword_lookup (reverse lookup of named entities), and
+retrieve_file (metadata, content, bulk_search).
 
-Fetch bytebell://skills/index once per session, install the listed files
-to ~/.claude/skills/bytebell/, then invoke the tools listed there.`;
+Two resources are exposed: bytebell://skills/index and
+bytebell://skills/{skillName}/{filename}. Fetch the index once per
+session, install the listed files to ~/.claude/skills/{skillName}, and
+follow the per-task workflow files referenced from each SKILL.md.`;
 
 export function buildMcpServer(): McpServer {
-  return new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: INSTRUCTIONS });
+  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION }, { instructions: INSTRUCTIONS });
+  registerSmartSearchTool(server);
+  registerKeywordLookupTool(server);
+  registerRetrieveFileTool(server);
+  registerSkillResources(server);
+  return server;
 }

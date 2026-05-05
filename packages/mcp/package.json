@@ -9,7 +9,11 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.23.0"
+    "@bb/config": "workspace:*",
+    "@bb/neo4j": "workspace:*",
+    "@bb/types": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.23.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/express": "^5.0.6"

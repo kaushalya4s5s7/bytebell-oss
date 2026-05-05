@@ -57,6 +57,8 @@ function upsertKnowledgeNode(doc: KnowledgeDoc): Promise<void>;
 function setKnowledgeStateInGraph(knowledgeId: string, state: KnowledgeState): Promise<void>;
 function upsertFileNode(input: UpsertFileNodeInput): Promise<void>;
 
+function runCypher<T = unknown>(query: string, params?: Record<string, unknown>): Promise<T[]>;
+
 interface PingResult {
   ok: boolean;
   latencyMs: number;
@@ -71,9 +73,15 @@ interface UpsertFileNodeInput {
 }
 ```
 
-`_getDriver`, `_runCypher`, `__resetForTests` are **internal** —
-consumed only inside the package. Higher tiers cannot reach a raw
-`Driver` handle today.
+`_getDriver` and `__resetForTests` are **internal** — consumed only
+inside the package. Higher tiers cannot reach a raw `Driver` handle.
+
+`runCypher` is the **only** public read primitive — re-exported from
+`_runCypher` so domain-tier consumers (`@bb/mcp` retrieval) can run
+arbitrary read queries without each one being typed at the infra
+layer. Writes still go through the dedicated `upsert*` helpers; the
+`@bb/neo4j` package intentionally does not expose a raw `Driver` or
+session.
 
 ## Graph schema (v1)
 
