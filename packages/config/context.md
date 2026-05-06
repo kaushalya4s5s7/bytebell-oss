@@ -1,0 +1,114 @@
+# `@bb/config` — context
+
+## Tier
+
+Infrastructure. May depend on Kernel (`@bb/types`, when it exists) and external
+packages (`zod`). May be imported by every higher tier (Strategy, Domain,
+Binaries).
+
+## Responsibility
+
+Single source of truth for runtime settings stored in
+`~/.bytebell/config.json`. Owns:
+
+- Path resolution for `~/.bytebell/` and `config.json`
+- Schema (Zod, strict mode) + typed `Config` enum
+- First-run materialization of a default `config.json`
+- Memoized in-process load
+- Atomic, validating writes via `setConfigValue`
+- Required-field completeness check with CLI-hint strings
+
+This package does **not** read from `process.env` and never will.
+
+## Public exports
+
+```ts
+type LogLevel
+const LOG_LEVELS: readonly LogLevel[]
+interface BytebellConfig
+type ConfigValue<K extends Config>
+type ConfigValueMap
+type ConfigCompletenessResult
+
+function loadConfig(): BytebellConfig
+function getConfigValue<K extends Config>(k: K): ConfigValue<K>
+function setConfigValue<K extends Config>(k: K, v: ConfigValue<K>): void
+function isConfigComplete(): ConfigCompletenessResult
+function getBytebellHome(): string
+function getConfigPath(): string
+function ensureBytebellHome(): void
+
+function __setBytebellHomeForTests(home: string | null): void  // test-only
+```
+
+The `Config` enum lives in `@bb/types`; `ConfigIncompleteError` lives in
+`@bb/errors`. Both are imported from those packages directly, not from
+`@bb/config`.
+
+Config keys (v0): `server_port`, `mongo_uri`, `neo4j_uri`, `neo4j_user`,
+`neo4j_password`, `redis_url`, `openrouter_api_key`, `openrouter_model`,
+`concurrency.{pdf,website,github,bitbucket}`, `log_level`,
+`log_retention_days`.
+
+Anything not in this list is internal — do not import from subpaths.
+
+## Data ownership
+
+- `~/.bytebell/` directory creation (mode `0700`)
+- `~/.bytebell/config.json` content + atomic writes (mode `0600`)
+- Default values for every config key
+
+This package does **not** own:
+
+- `~/.bytebell/install_id` — assigned to a later package
+- `~/.bytebell/keys.json` — out of scope for v0
+- `~/.bytebell/license.json` — separate package
+- `~/.bytebell/logs/` — `@bb/logger`/`@bb/telemetry`
+- `~/.bytebell/cost-ledger.sqlite` — `@bb/llm`
+
+## Invariants
+
+1. **No env var reads.** Source files contain no `process.env` references.
+   Enforced at lint time ([eslint.config.mjs:71-94](../../eslint.config.mjs#L71-L94)).
+2. **No `.env` / `dotenv` / `BYTEBELL_HOME`.** The only test seam is the
+   programmatic `__setBytebellHomeForTests`.
+3. **Strict schema.** Unknown keys in `config.json` cause `loadConfig()` to
+   throw — typo defense.
+4. **Defaults always present.** `loadConfig()` never returns a partial config;
+   missing required fields surface as empty strings, surfaced via
+   `isConfigComplete()` rather than thrown by the loader.
+5. **Atomic writes.** Every write is `tmp → fsync → rename`. A crash mid-write
+   leaves the previous `config.json` intact.
+6. **File mode `0600`.** `config.json` contains the OpenRouter API key in
+   plaintext (v0 decision); the file is owner-read/write only.
+7. **No public file paths besides home + config.** Other files under
+   `~/.bytebell/` are not addressed by this package.
+
+## External dependencies
+
+- `zod` — runtime schema + parsing
+- Node built-ins — `node:fs`, `node:os`, `node:path`
+
+No HTTP, no DB, no logger. This package boots before everything else.
+
+## What is intentionally out of scope
+
+- `install_id` generation/reading (deferred ownership)
+- OS keychain / `keys.json` / encrypted secrets
+- License JWT
+- Logger initialization
+- Telemetry
+- A `bytebell set` CLI command (lives in `@bb/cli`; uses `setConfigValue`
+  primitive)
+
+## How to extend
+
+To add a new config key:
+
+1. Add a new `Config` enum entry in `src/schema.ts`.
+2. Add the field to `configSchema` with a `.default(...)`.
+3. Add a `ConfigValueMap` entry mapping the enum to its TS type.
+4. If required, add the enum to `REQUIRED_KEYS`.
+5. Add a hint string to `HINTS`.
+6. Add cases to `readField` and `writeField`.
+7. Update this `context.md` if the new key changes invariants or ownership.

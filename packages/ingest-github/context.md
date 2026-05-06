@@ -1,0 +1,180 @@
+# `@bb/ingest-github` — context
+
+## Tier
+
+Domain. Depends on Kernel (`@bb/types`, `@bb/errors`), Infrastructure
+(`@bb/config`, `@bb/mongo`, `@bb/neo4j`), Cross-cutting (`@bb/llm`), and
+Strategy (`@bb/queue`). May be imported by Binaries (`@bb/server` calls
+`registerGithubWorkers()` and `registerLocalIngestWorker()` once at
+boot). Never by `@bb/cli`.
+
+## Responsibility
+
+Consumes `JobType.GithubIndex` and `JobType.LocalIngest` jobs published
+by `@bb/queue`. For each job, runs the active `IngestionStrategy` over
+the populated `~/.bytebell/repos/<knowledgeId>/` directory and persists
+per-file results to Mongo (`raw` collection via `@bb/mongo`) **and**
+Neo4j (`:File` nodes + `:HAS_KEYWORD` / `:HAS_CLASS` / `:HAS_FUNCTION`
+/ `:HAS_IMPORT` rels via `@bb/neo4j`). v1 ships one strategy —
+`BasicFileAnalysisStrategy` — implementing the deliberately minimal
+"very basic file analysis" approach.
+
+The package owns:
+
+- The `github_index` and `local_ingest` worker handlers (registered via
+  `@bb/queue.registerWorker`)
+- The git clone / fetch lifecycle for one repo per knowledge ID, kept on
+  disk under `~/.bytebell/repos/<knowledgeId>/` for future `git_pull`
+- The hardcoded ignore list (directories, lockfiles, binary extensions,
+  size cap) for repo scanning
+- The 7-field per-file LLM analysis prompt
+- Translation of LLM output JSON → `RawFileDoc` shape (Mongo) **and**
+  `:File` graph node + entity relationships (Neo4j), with safe fallbacks
+  for malformed responses
+- Knowledge `status.state` transitions (`Processing` on start,
+  `Processed` on success, `Failed` on caught error) — kept in lock-step
+  between Mongo and Neo4j via a shared `transitionState` helper
+- The `IngestionStrategy` pluggable abstraction — the worker delegates
+  the post-clone scan/analyze/persist loop to a strategy instance.
+  v1 ships one concrete: `BasicFileAnalysisStrategy`
+
+The package does **not** own:
+
+- The `github_pull` worker handler (deferred — the publisher exists in
+  `@bb/queue` but no consumer yet)
+- Folder-level summarization (out of scope per OSS strategy; future
+  strategies can add this)
+- Semantic chunking, big-file processing, smart sampling (future
+  strategies)
+- Recovery / progress reporting / failed-files tracking
+- Provider abstraction (no Bitbucket support; GitHub-only)
+- Concurrency control (sequential per-file processing intentional for
+  v0; revisit when users complain)
+
+## Public exports
+
+```ts
+function registerGithubWorkers():        void   // wires JobType.GithubIndex
+function registerLocalIngestWorker():    void   // wires JobType.LocalIngest
+
+interface IngestionContext  { knowledgeId: string; rootDir: string }
+interface IngestionStrategy { readonly name: string; ingest(ctx: IngestionContext): Promise<void> }
+
+class BasicFileAnalysisStrategy implements IngestionStrategy
+```
+
+Both `register*Workers()` calls run once at `@bb/server` boot. The
+worker hardcodes a single `IngestionStrategy` instance (currently
+`new BasicFileAnalysisStrategy()`). Adding another strategy = new file
+
+- change one line in `src/worker.ts`.
+
+## Data ownership
+
+- `~/.bytebell/repos/<knowledgeId>/` — the cloned working tree (for
+  `github_index`) or the server-copied working tree (for `local_ingest`),
+  persisted across job retries (clone is idempotent: `git fetch + reset`
+  if `.git` exists). Never deleted automatically — `bytebell clean` per
+  [docs/arch.md:157](../../docs/arch.md#L157) will own removal.
+- The Knowledge document's `status.state` field — written via
+  `setKnowledgeState` from `@bb/mongo` AND
+  `setKnowledgeStateInGraph` from `@bb/neo4j`, kept in lock-step.
+- Raw documents (one per scanned file) — written via `upsertRawFile`
+  from `@bb/mongo`. Compound key `(knowledgeId, relativePath)`.
+- `:File` graph nodes + `:HAS_FILE` / `:HAS_KEYWORD` / `:HAS_CLASS` /
+  `:HAS_FUNCTION` / `:HAS_IMPORT` relationships — written via
+  `upsertFileNode` from `@bb/neo4j`.
+
+## Invariants
+
+1. **Sequential per-file processing.** Intentionally degraded; one
+   `askLLM` + one `upsertRawFile` per file. No `Promise.all`, no
+   concurrency cap. Revisit when the latency profile demands it.
+2. **Clone idempotent.** Re-runs (BullMQ retries) call `git fetch` +
+   `git reset --hard` in the existing dir rather than re-cloning.
+   Tokens are re-injected into the remote URL each time.
+3. **Token redaction.** `GitCloneError` carries the **redacted** repo
+   URL (`https://user:***@host`) — the raw `gitToken` never appears in
+   error messages or logs.
+4. **State transition order.** `Processing` is set _before_ any clone
+   work. `Processed` is set _only_ after the entire scan + analyze loop
+   completes. On any thrown error, the handler best-effort sets `Failed`
+   then re-throws so BullMQ records the retry.
+5. **Fail-soft analysis, fail-hard infra.** A single file's LLM call
+   failing falls back to an empty-analysis Raw doc and processing
+   continues. A clone failure or Mongo write failure throws and propagates
+   to BullMQ for retry under the queue's `attempts: 3`.
+6. **Hardcoded filters only.** No LLM-based ignore decisions in v0. The
+   directory / file / extension blocklists in `scan.ts` are the only
+   way files get skipped.
+
+## External dependencies
+
+- Node built-ins only: `node:child_process` (git), `node:fs/promises`
+  (walk), `node:crypto` (sha-256), `node:path`, `node:util`
+- Workspace deps: `@bb/config`, `@bb/errors`, `@bb/llm`, `@bb/mongo`,
+  `@bb/neo4j`, `@bb/queue`, `@bb/types`
+- System binary: **`git`** must be on the user's `PATH`. Documented in
+  the project README as a runtime prerequisite.
+
+## What is intentionally out of scope (v0)
+
+- `github_pull` worker (`enqueueGithubPull` jobs sit in the queue until
+  this lands; the existing strategy interface accepts it cleanly)
+- Bitbucket / GitLab support
+- GitHub API streaming mode (always shell-clone)
+- Default-branch auto-detection (caller supplies `branch`; defaults to
+  `"main"`)
+- Concurrency control / parallel file processing
+- Folder-level summaries / `repoSummary.json` / `flat-folder` strategy
+- Semantic chunking (`SemanticChunker`)
+- Big-file handling (>1 MB files are skipped, not chunked)
+- Smart file processor tiers (FULL / SMART_SAMPLE / METADATA_ONLY)
+- Recovery / `ProcessingStateManager`
+- Progress reporting / heartbeats
+- Failed-files tracker
+- Adaptive memory manager
+- Comprehensive 17-field LLM analysis (we ship 7: `purpose`, `summary`,
+  `language`, `classes`, `functions`, `imports`, `keywords`)
+- Model escalation
+- LLM-based ignore decisions
+- Cost ledger (the `@bb/llm` package itself doesn't have one yet)
+- Auto-cleanup of `~/.bytebell/repos/<knowledgeId>/`
+
+## How to extend
+
+Adding a new strategy (the primary extension point):
+
+1. Create `src/<MyStrategy>.ts` exporting a class that
+   `implements IngestionStrategy`. Its `ingest({ knowledgeId, rootDir })`
+   is invoked once per job after the source files have landed at
+   `rootDir`.
+2. Compose any of the existing helpers — `walkRepo`, `analyzeFile`,
+   `upsertRawFile`, `upsertFileNode`, `askLLM` — or do something
+   completely different.
+3. In `src/worker.ts`, change
+   `const STRATEGY = new BasicFileAnalysisStrategy()` to your class.
+   (Or, when richer wiring is needed, introduce a registry — out of
+   scope for v1.)
+4. Re-export from `src/index.ts` if other packages should be able to
+   reference it directly.
+
+Adding the `github_pull` worker:
+
+1. Create `src/worker-pull.ts` with a `handleGithubPull` function:
+   `git pull origin <branch>` → `git diff --name-only <prevSha>..HEAD`
+   → invoke a `Strategy` (likely the same `BasicFileAnalysisStrategy`)
+   over a smaller scoped subset of files → delete Raw + graph entries
+   for files removed in the diff (needs `deleteRawFile` and
+   `deleteFileNode` helpers in `@bb/mongo` / `@bb/neo4j`).
+2. In `src/worker.ts`'s `registerGithubWorkers`, also call
+   `registerWorker(JobType.GithubPull, handleGithubPull)`.
+3. Update _Public exports_ / _Out of scope_ here.
+
+Adding concurrency:
+
+1. Pull `Config.ConcurrencyGithub` from `@bb/config` inside the
+   strategy's `ingest()`.
+2. Replace the `for await` loop with a bounded-parallel implementation
+   (small inline `pLimit` style).
+3. Document the new max-concurrency invariant.
