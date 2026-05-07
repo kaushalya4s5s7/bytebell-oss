@@ -7,6 +7,7 @@ const DEFAULT_TIMEOUT_MS = 90_000;
 
 export interface AskLlmOptions {
   model?: string;
+  fallbackModels?: string[];
   timeoutMs?: number;
   systemPrompt?: string;
 }
@@ -29,6 +30,7 @@ interface OpenRouterMessage {
 
 interface OpenRouterRequest {
   model: string;
+  models?: string[];
   messages: OpenRouterMessage[];
 }
 
@@ -47,6 +49,14 @@ export async function askLLM(prompt: string, opts: AskLlmOptions = {}): Promise<
     throw new LlmConfigError("bytebell keys set");
   }
   const model = opts.model ?? getConfigValue(Config.OpenrouterModel);
+  const fallbackSlots = opts.fallbackModels ?? [
+    getConfigValue(Config.OpenrouterFallbackModel1),
+    getConfigValue(Config.OpenrouterFallbackModel2),
+    getConfigValue(Config.OpenrouterFallbackModel3),
+    getConfigValue(Config.OpenrouterFallbackModel4),
+  ];
+  const chain = [model, ...fallbackSlots].filter((m) => m.length > 0);
+  const uniqueChain = [...new Set(chain)];
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   const messages: OpenRouterMessage[] = [];
@@ -55,7 +65,8 @@ export async function askLLM(prompt: string, opts: AskLlmOptions = {}): Promise<
   }
   messages.push({ role: "user", content: prompt });
 
-  const body: OpenRouterRequest = { model, messages };
+  const body: OpenRouterRequest =
+    uniqueChain.length > 1 ? { model, models: uniqueChain, messages } : { model, messages };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 

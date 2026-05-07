@@ -21,7 +21,11 @@ export const configSchema = z
     neo4j_password: z.string().default(""),
     redis_url: z.string().default(""),
     openrouter_api_key: z.string().default(""),
-    openrouter_model: z.string().default("anthropic/claude-sonnet-4.6"),
+    openrouter_model: z.string().default("deepseek/deepseek-v4-flash"),
+    openrouter_fallback_model_1: z.string().default("qwen/qwen3.5-flash-02-23"),
+    openrouter_fallback_model_2: z.string().default("minimax/minimax-m2.7"),
+    openrouter_fallback_model_3: z.string().default("moonshotai/kimi-k2.5"),
+    openrouter_fallback_model_4: z.string().default("x-ai/grok-4.3"),
     concurrency: concurrencySchema.default({ github: 2 }),
     log_level: z.enum(LOG_LEVELS).default("info"),
     log_retention_days: z.number().int().positive().default(14),
@@ -41,6 +45,10 @@ export type ConfigValueMap = {
   [Config.RedisUrl]: string;
   [Config.OpenrouterApiKey]: string;
   [Config.OpenrouterModel]: string;
+  [Config.OpenrouterFallbackModel1]: string;
+  [Config.OpenrouterFallbackModel2]: string;
+  [Config.OpenrouterFallbackModel3]: string;
+  [Config.OpenrouterFallbackModel4]: string;
   [Config.ConcurrencyGithub]: number;
   [Config.LogLevel]: LogLevel;
   [Config.LogRetentionDays]: number;
@@ -66,6 +74,10 @@ export const HINTS: Readonly<Record<Config, string>> = {
   [Config.RedisUrl]: "bytebell set redis <url>",
   [Config.OpenrouterApiKey]: "bytebell keys set",
   [Config.OpenrouterModel]: "bytebell models set <model-id>",
+  [Config.OpenrouterFallbackModel1]: "bytebell set openrouter-fallback-model-1 <model-id>",
+  [Config.OpenrouterFallbackModel2]: "bytebell set openrouter-fallback-model-2 <model-id>",
+  [Config.OpenrouterFallbackModel3]: "bytebell set openrouter-fallback-model-3 <model-id>",
+  [Config.OpenrouterFallbackModel4]: "bytebell set openrouter-fallback-model-4 <model-id>",
   [Config.ConcurrencyGithub]: "bytebell set concurrency.github <n>",
   [Config.LogLevel]: "bytebell set log-level <error|warn|info|debug>",
   [Config.LogRetentionDays]: "bytebell set log-retention-days <n>",
@@ -89,6 +101,14 @@ export function readField<K extends Config>(cfg: BytebellConfig, key: K): Config
       return cfg.openrouter_api_key as ConfigValue<K>;
     case Config.OpenrouterModel:
       return cfg.openrouter_model as ConfigValue<K>;
+    case Config.OpenrouterFallbackModel1:
+      return cfg.openrouter_fallback_model_1 as ConfigValue<K>;
+    case Config.OpenrouterFallbackModel2:
+      return cfg.openrouter_fallback_model_2 as ConfigValue<K>;
+    case Config.OpenrouterFallbackModel3:
+      return cfg.openrouter_fallback_model_3 as ConfigValue<K>;
+    case Config.OpenrouterFallbackModel4:
+      return cfg.openrouter_fallback_model_4 as ConfigValue<K>;
     case Config.ConcurrencyGithub:
       return cfg.concurrency.github as ConfigValue<K>;
     case Config.LogLevel:
@@ -116,6 +136,14 @@ export function writeField<K extends Config>(cfg: BytebellConfig, key: K, value:
       return { ...cfg, openrouter_api_key: value as string };
     case Config.OpenrouterModel:
       return { ...cfg, openrouter_model: value as string };
+    case Config.OpenrouterFallbackModel1:
+      return { ...cfg, openrouter_fallback_model_1: value as string };
+    case Config.OpenrouterFallbackModel2:
+      return { ...cfg, openrouter_fallback_model_2: value as string };
+    case Config.OpenrouterFallbackModel3:
+      return { ...cfg, openrouter_fallback_model_3: value as string };
+    case Config.OpenrouterFallbackModel4:
+      return { ...cfg, openrouter_fallback_model_4: value as string };
     case Config.ConcurrencyGithub:
       return { ...cfg, concurrency: { ...cfg.concurrency, github: value as number } };
     case Config.LogLevel:

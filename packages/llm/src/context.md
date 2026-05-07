@@ -9,12 +9,17 @@ package-level contract; this file documents how the source tree is split.
   packages may import. Exposes `askLLM` and the `AskLlmOptions` type.
   Anything not re-exported here is internal.
 - **[client.ts](client.ts)** — the `askLLM` implementation. Reads
-  `Config.OpenrouterApiKey` + `Config.OpenrouterModel` via `@bb/config`,
-  builds the `messages` array (optional system prompt + user prompt),
-  POSTs to OpenRouter via Bun's built-in `fetch` with an AbortController
-  timeout, parses the typed `OpenRouterResponse`, returns the first
-  choice's content. Throws `LlmConfigError` if the API key is empty,
-  `LlmError` on timeout / HTTP non-2xx / empty completion.
+  `Config.OpenrouterApiKey`, the primary `Config.OpenrouterModel`, and
+  the four fallback slots `Config.OpenrouterFallbackModel1..4` via
+  `@bb/config`. Builds the deduplicated chain `[primary, ...nonEmpty
+(slot1..4)]`; if the chain has ≥2 entries the request body includes a
+  `models: [...]` array so OpenRouter routes among them natively. Builds
+  the `messages` array (optional system prompt + user prompt), POSTs to
+  OpenRouter via Bun's built-in `fetch` with an AbortController timeout,
+  parses the typed `OpenRouterResponse`, returns the first choice's
+  content. `usage.model` reflects which model OpenRouter actually
+  routed to. Throws `LlmConfigError` if the API key is empty, `LlmError`
+  on timeout / HTTP non-2xx / empty completion.
 
 ## Module dependency graph
 
