@@ -13,11 +13,14 @@ Never by `@bb/cli`.
 Single, minimal OpenRouter-backed LLM call surface for v0:
 
 - `askLLM(prompt, opts?)` — POST to OpenRouter's chat-completions endpoint
-  using `Config.OpenrouterApiKey` + `Config.OpenrouterModel`, return
-  `{ content, usage: { model, inputTokens, outputTokens } }` from the
-  response. Tokens come straight from OpenRouter's `usage.prompt_tokens`
-  / `usage.completion_tokens`; `model` is the actual model the gateway
-  routed to.
+  using `Config.OpenrouterApiKey` + `Config.OpenrouterModel` as the
+  primary model, plus `Config.OpenrouterFallbackModel1..4` as the
+  fallback chain. The request body includes a `models: [...]` array
+  when the deduplicated chain has ≥2 non-empty entries; OpenRouter
+  routes among them and bills only the responder. Returns
+  `{ content, usage: { model, inputTokens, outputTokens } }` where
+  `model` is the actual model the gateway routed to. Tokens come straight
+  from OpenRouter's `usage.prompt_tokens` / `usage.completion_tokens`.
 - `estimateCostUsd(model, inputTokens, outputTokens)` and
   `estimateCostFromBreakdown(modelTokens)` — async cost helpers backed
   by a one-shot fetch of OpenRouter's `/api/v1/models` (cached in module
@@ -45,6 +48,7 @@ function decodeTokens(tokens: number[]): string;
 
 interface AskLlmOptions {
   model?: string; // overrides Config.OpenrouterModel
+  fallbackModels?: string[]; // overrides Config.OpenrouterFallbackModel1..4
   timeoutMs?: number; // default 90_000
   systemPrompt?: string; // optional system role message
 }
@@ -71,8 +75,17 @@ cost ledger described in [docs/arch.md:137](../../docs/arch.md#L137) is
    `https://openrouter.ai/api/v1/chat/completions`.
 2. **No env reads.** API key + model come from `getConfigValue(...)`. No
    `process.env`, no `.env`. Repo-wide ESLint rule blocks `process.env`.
-3. **Single attempt.** No retry, no model escalation. Caller (today
-   `@bb/ingest-github`) handles retries via BullMQ's `attempts: 3`.
+3. **OpenRouter-native fallback chain.** The request body sends
+   `models: [primary, ...fallbacks]` whenever the deduplicated chain has
+   ≥2 entries. Primary is `Config.OpenrouterModel`; fallbacks come from
+   four discrete slots `Config.OpenrouterFallbackModel1` through
+   `…Model4` (each a `string`; empty string means "skip this slot"). All
+   four slots ship with curated defaults so a fresh install gets fallback
+   without any user action. OpenRouter tries the chain in order and bills
+   only the responder; `usage.model` reflects which one. Caller still
+   sees a single `AskLlmResult`. BullMQ's `attempts: 3` wraps the whole
+   call — retries walk the chain again, useful when a transient
+   OpenRouter outage clears between retries.
 4. **Errors are typed, not strings.** `LlmConfigError` carries the exact
    `bytebell keys set` hint; `LlmError` carries `cause`.
 5. **Timeout is enforced.** AbortController fires at `timeoutMs`; the
@@ -96,7 +109,6 @@ cost ledger described in [docs/arch.md:137](../../docs/arch.md#L137) is
 - Cost ledger (`~/.bytebell/cost-ledger.sqlite`) — lands with telemetry
 - Streaming responses
 - Tool / function calling
-- Model escalation (DEFAULT → SMARTER → SMARTEST)
 - A `askJsonLLM<T>(prompt, schema)` JSON-mode wrapper — caller does
   `JSON.parse` with a try/catch fallback today
 - Per-call prompt logging
