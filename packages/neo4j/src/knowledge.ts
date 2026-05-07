@@ -28,6 +28,28 @@ MATCH (k:Knowledge {knowledgeId: $knowledgeId})
 DETACH DELETE k
 `;
 
+// Defensive cleanup: wipe File nodes whose knowledgeId has no matching
+// :Knowledge. Orphans accumulate when a worker writes files after the Knowledge
+// node is deleted (interrupted runs, racing deletes, partial failures). The TUI
+// delete picker reads from Mongo, so orphan-only knowledgeIds are otherwise
+// unreachable.
+const DELETE_ORPHAN_FILES = `
+MATCH (f:File)
+WHERE NOT EXISTS { MATCH (:Knowledge {knowledgeId: f.knowledgeId}) }
+DETACH DELETE f
+`;
+
+// Entity nodes (:Keyword/:Class/:Function/:Module) are global, MERGE-deduped
+// across all knowledges. After deleting a knowledge's Files, any entity node
+// that was ONLY referenced by those Files becomes an orphan with no incoming
+// HAS_* edge. Sweep them so the graph stays tidy.
+const DELETE_ORPHAN_ENTITIES = `
+MATCH (n)
+WHERE (n:Keyword OR n:Class OR n:Function OR n:Module)
+  AND NOT EXISTS { MATCH (:File)-[]->(n) }
+DELETE n
+`;
+
 export async function upsertKnowledgeNode(doc: KnowledgeDoc): Promise<void> {
   const sourceKind = doc.source.kind;
   const sourceUrl = doc.source.kind === "github" ? doc.source.repoUrl : doc.source.sourcePath;
@@ -54,7 +76,9 @@ export async function setKnowledgeStateInGraph(knowledgeId: string, state: Knowl
 
 export async function deleteKnowledgeGraph(knowledgeId: string): Promise<void> {
   await _runCypher(DELETE_FILES_BY_KNOWLEDGE, { knowledgeId });
+  await _runCypher(DELETE_ORPHAN_FILES);
   await _runCypher(DELETE_KNOWLEDGE_NODE, { knowledgeId });
+  await _runCypher(DELETE_ORPHAN_ENTITIES);
 }
 
 function deriveRepoName(source: KnowledgeSource): string {
