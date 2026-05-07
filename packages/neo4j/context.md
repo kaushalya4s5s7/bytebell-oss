@@ -40,8 +40,13 @@ The package owns:
   itself. Called by the server's `DELETE /api/v1/repos/:knowledgeId`
   route.
 - File-node CRUD (`upsertFileNode`) — composes the per-file relationships
-  (`:HAS_KEYWORD / :HAS_CLASS / :HAS_FUNCTION / :HAS_IMPORT`), clearing
-  stale relationships before re-attaching for re-runs
+  (`:HAS_KEYWORD / :HAS_CLASS / :HAS_FUNCTION / :HAS_IMPORT_INTERNAL /
+:HAS_IMPORT_EXTERNAL`), clearing stale relationships before
+  re-attaching for re-runs. The two-`:HAS_IMPORT_*` split mirrors
+  kube-package's distinction between relative imports and external
+  packages — downstream MCP queries can ask "which files import this
+  internal module" vs "which files import this external package"
+  cleanly
 
 The package does **not** own:
 
@@ -99,7 +104,8 @@ session.
   -[:HAS_KEYWORD]->  (:Keyword  {name})         // global, lowercase, MERGE-deduped
   -[:HAS_CLASS]->    (:Class    {signature})    // global, MERGE-deduped
   -[:HAS_FUNCTION]-> (:Function {signature})    // global, MERGE-deduped
-  -[:HAS_IMPORT]->   (:Module   {name})         // global, MERGE-deduped
+  -[:HAS_IMPORT_INTERNAL]-> (:Module {name})    // relative imports (./ or ../)
+  -[:HAS_IMPORT_EXTERNAL]-> (:Module {name})    // external packages / stdlib
 ```
 
 `Knowledge.repoName` is derived once at upsert time from the source —

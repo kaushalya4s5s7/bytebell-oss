@@ -7,7 +7,8 @@ export interface FileAnalysis {
   businessContext: string;
   classes: string[];
   functions: string[];
-  imports: string[];
+  importsInternal: string[];
+  importsExternal: string[];
   keywords: string[];
 }
 

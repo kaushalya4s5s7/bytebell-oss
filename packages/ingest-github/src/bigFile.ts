@@ -4,11 +4,12 @@ import {
   CONDENSE_CONTEXT_LIMIT,
   CONDENSE_PROMPT_OVERHEAD,
   FALLBACK_LANGUAGE,
+  FILE_ANALYSIS_FIELDS_BLOCK,
   MAX_TOKENS_PER_CHUNK,
   SMALL_FILE_DEDUP_THRESHOLD,
   emptyAnalysis,
-  estimateTokens,
   parseFileAnalysisJson,
+  tokenLen,
   tryParse,
 } from "./analysisShared.ts";
 
@@ -54,18 +55,7 @@ function splitIntoChunks(content: string, maxTokensPerChunk: number): string[] {
   let bufTokens = 0;
 
   for (const line of lines) {
-    const lineTokens = estimateTokens(line);
-    if (lineTokens > maxTokensPerChunk) {
-      if (buf.length > 0) {
-        chunks.push(buf.join("\n"));
-        buf = [];
-        bufTokens = 0;
-      }
-      for (const segment of splitLongLine(line, maxTokensPerChunk)) {
-        chunks.push(segment);
-      }
-      continue;
-    }
+    const lineTokens = tokenLen(line + "\n");
     if (bufTokens + lineTokens > maxTokensPerChunk && buf.length > 0) {
       chunks.push(buf.join("\n"));
       buf = [];
@@ -78,35 +68,6 @@ function splitIntoChunks(content: string, maxTokensPerChunk: number): string[] {
     chunks.push(buf.join("\n"));
   }
   return chunks;
-}
-
-function splitLongLine(line: string, maxTokens: number): string[] {
-  const segments: string[] = [];
-  let remaining = line;
-  while (remaining.length > 0) {
-    if (estimateTokens(remaining) <= maxTokens) {
-      segments.push(remaining);
-      break;
-    }
-    let low = 0;
-    let high = remaining.length;
-    let best = Math.min(remaining.length, maxTokens * 2);
-    while (low < high) {
-      const mid = Math.floor((low + high + 1) / 2);
-      if (estimateTokens(remaining.substring(0, mid)) <= maxTokens) {
-        best = mid;
-        low = mid;
-      } else {
-        high = mid - 1;
-      }
-    }
-    if (best < 100) {
-      best = Math.min(100, remaining.length);
-    }
-    segments.push(remaining.substring(0, best));
-    remaining = remaining.substring(best);
-  }
-  return segments;
 }
 
 async function analyzeChunk(
@@ -143,7 +104,7 @@ async function condenseRecursively(
     return first;
   }
   const prompt = buildCondensePrompt(relativePath, items);
-  if (estimateTokens(prompt) <= CONDENSE_CONTEXT_LIMIT) {
+  if (tokenLen(prompt) <= CONDENSE_CONTEXT_LIMIT) {
     return await condenseOne(prompt, items, usage);
   }
   const budget = Math.max(CONDENSE_CONTEXT_LIMIT - CONDENSE_PROMPT_OVERHEAD, 2_000);
@@ -175,7 +136,7 @@ function batchByTokenBudget(items: ChunkResult[], budget: number): ChunkResult[]
   let current: ChunkResult[] = [];
   let currentTokens = 0;
   for (const item of items) {
-    const itemTokens = estimateTokens(serializeItem(item));
+    const itemTokens = tokenLen(serializeItem(item));
     if (currentTokens + itemTokens > budget && current.length > 0) {
       batches.push(current);
       current = [];
@@ -197,7 +158,8 @@ function dedupAnalyses(items: ChunkResult[]): ChunkResult {
   const contexts = items.map((i) => i.analysis.businessContext).filter((s) => s.length > 0);
   const classes = unique(items.flatMap((i) => i.analysis.classes));
   const functions = unique(items.flatMap((i) => i.analysis.functions));
-  const imports = unique(items.flatMap((i) => i.analysis.imports));
+  const importsInternal = unique(items.flatMap((i) => i.analysis.importsInternal));
+  const importsExternal = unique(items.flatMap((i) => i.analysis.importsExternal));
   const keywords = unique(items.flatMap((i) => i.analysis.keywords)).slice(0, 10);
   return {
     language,
@@ -207,7 +169,8 @@ function dedupAnalyses(items: ChunkResult[]): ChunkResult {
       businessContext: contexts.join(" "),
       classes,
       functions,
-      imports,
+      importsInternal,
+      importsExternal,
       keywords,
     },
   };
@@ -222,14 +185,7 @@ function buildChunkPrompt(relativePath: string, chunkIndex: number, totalChunks:
 Focus on what exists in THIS CHUNK only. Do not infer content from other chunks.
 Return ONLY a JSON object, no prose, no markdown fences, with EXACTLY these keys:
 
-- purpose         : string  — <= 30 words, why the content in this chunk exists
-- summary         : string  — <= 80 words, plain-English description of this chunk's contents
-- businessContext : string  — 2-3 lines describing the business/product framing visible in this chunk. Empty string if not inferable.
-- language        : string  — lowercase canonical name of the language identifiable from the contents (e.g. typescript, python, go, dockerfile, markdown, terraform, graphql). Return "unknown" if you cannot identify the language with confidence — do not guess generic labels like "text" or "plain".
-- classes         : string[] — each item: "ClassName (~Lstart-end): one-line responsibility". Empty array if none.
-- functions       : string[] — each item: "func_name (~Lstart-end): one-line responsibility". Top-level only; do not list methods of classes already listed above. Empty array if none.
-- imports         : string[] — module identifiers as written in source. Empty array if none.
-- keywords        : string[] — up to 10 technical/domain keywords. Lowercase, no generic words like "code" or "file".
+${FILE_ANALYSIS_FIELDS_BLOCK}
 
 Do not invent line ranges — derive from the actual content.
 
@@ -238,19 +194,28 @@ Chunk content:
 ${content}`;
 }
 
+const CONDENSE_MERGE_RULES = `## Merge rules (apply on top of the field definitions above)
+
+- purpose          : merge into ONE cohesive 2-3 sentence description.
+- summary          : ≤600 tokens, plain-English; cover what the file does, why it exists, and how it fits in the system.
+- businessContext  : merge into ONE short paragraph (2-3 lines).
+- language         : single canonical name; if items disagree, pick the value that appears most often; "unknown" if truly inconclusive.
+- classes          : deduplicate. Keep ONLY exported / public / entry-point items. Drop private helpers and internal DTOs. Aggressively filter to stay under ~3000 tokens total. Preserve the "Name (~Lstart-end): description" format. Each entry MUST be a single class — never concatenate multiple into one string.
+- functions        : deduplicate. Keep ONLY exported / public / entry-point items, API handlers, lifecycle methods. Drop private helpers and trivial getters/setters. Aggressively filter to stay under ~3000 tokens total. Preserve the "name (~Lstart-end): description" format. Each entry MUST be a single function — never concatenate multiple into one string.
+- importsInternal  : deduplicate within the list. Keep significant relative imports.
+- importsExternal  : deduplicate within the list. Drop stdlib and trivial utilities; keep significant frameworks and core packages.
+- keywords         : deduplicate, keep the top 10 most representative.`;
+
 function buildCondensePrompt(relativePath: string, items: ChunkResult[]): string {
   const serialized = items.map((item, i) => `--- Item ${i + 1} ---\n${serializeItem(item)}`).join("\n\n");
   return `You are condensing ${items.length} partial analyses of a single file \`${relativePath}\` into ONE coherent file-level analysis.
-Return ONLY a JSON object, no prose, no markdown fences, with EXACTLY these keys (same shape as the chunk analyses):
+Return ONLY a JSON object, no prose, no markdown fences, with EXACTLY the same keys as each input item.
 
-- purpose         : string  — merge all item purposes into ONE cohesive 2-3 sentence description.
-- summary         : string  — <= 80 words plain-English summary of the entire file.
-- businessContext : string  — merge into ONE short paragraph (2-3 lines) of business/product framing. Empty string if no item provided one.
-- language        : string  — single lowercase canonical name. Use "unknown" if items disagree or none identified one.
-- classes         : string[] — deduplicate. Keep ONLY exported/public classes, interfaces, types, enums and core abstractions. Drop internal helpers and DTOs. Preserve "Name (~Lstart-end): description" format. Aggressively filter to stay under ~3000 tokens total.
-- functions       : string[] — deduplicate. Keep ONLY exported/public functions, entry points, API handlers, lifecycle methods. Drop private helpers, trivial getters/setters. Preserve "name (~Lstart-end): description" format. Aggressively filter to stay under ~3000 tokens total.
-- imports         : string[] — deduplicate. Drop stdlib and trivial utils.
-- keywords        : string[] — deduplicate, keep the top 10 most representative.
+## Field definitions (see these for the meaning of each field)
+
+${FILE_ANALYSIS_FIELDS_BLOCK}
+
+${CONDENSE_MERGE_RULES}
 
 INPUT (${items.length} partial analyses):
 
@@ -266,7 +231,8 @@ function serializeItem(item: ChunkResult): string {
     `businessContext: ${a.businessContext}`,
     `classes (${a.classes.length}): ${JSON.stringify(a.classes)}`,
     `functions (${a.functions.length}): ${JSON.stringify(a.functions)}`,
-    `imports (${a.imports.length}): ${JSON.stringify(a.imports)}`,
+    `importsInternal (${a.importsInternal.length}): ${JSON.stringify(a.importsInternal)}`,
+    `importsExternal (${a.importsExternal.length}): ${JSON.stringify(a.importsExternal)}`,
     `keywords (${a.keywords.length}): ${JSON.stringify(a.keywords)}`,
   ].join("\n");
 }

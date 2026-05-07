@@ -27,8 +27,11 @@ The package owns:
   disk under `~/.bytebell/repos/<knowledgeId>/` for future `git_pull`
 - The hardcoded ignore list (directories, lockfiles, binary extensions,
   size cap) for repo scanning
-- The 8-field per-file LLM analysis prompt (small-file path) and the
-  chunked + condensed analysis path for files above the token threshold
+- The 9-field per-file LLM analysis prompt (small-file path) and the
+  chunked + condensed analysis path for files above the token threshold.
+  Field definitions live in `FILE_ANALYSIS_FIELDS_BLOCK` (single source
+  of truth; wording adapted from kube-package's
+  `fileAnalysisFieldDefs.ts`)
 - Translation of LLM output JSON → `RawFileDoc` shape (Mongo) **and**
   `:File` graph node + entity relationships (Neo4j), with safe fallbacks
   for malformed responses
@@ -143,9 +146,9 @@ worker hardcodes a single `IngestionStrategy` instance (currently
 - Progress reporting / heartbeats
 - Failed-files tracker
 - Adaptive memory manager
-- Comprehensive 17-field LLM analysis (we ship 8: `purpose`, `summary`,
-  `businessContext`, `language`, `classes`, `functions`, `imports`,
-  `keywords`)
+- Comprehensive 17-field LLM analysis (we ship 9: `purpose`, `summary`,
+  `businessContext`, `language`, `classes`, `functions`,
+  `importsInternal`, `importsExternal`, `keywords`)
 - Model escalation
 - LLM-based ignore decisions
 - Cost ledger (the `@bb/llm` package itself doesn't have one yet)

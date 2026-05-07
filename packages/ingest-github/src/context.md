@@ -64,41 +64,52 @@ gitToken? })`. Delegates to `node:child_process.execFile` (no shell,
   memory — `node:fs/promises.opendir` recursive descent.
 - **[analyze.ts](analyze.ts)** — public entry: `analyzeFile(relativePath,
 content)` returns `{ language, analysis, usage }`. Routes per file by
-  `estimateTokens(content)`: above `BIG_FILE_TOKEN_THRESHOLD` →
-  `analyzeBigFile`; otherwise builds the 8-field prompt
-  (`purpose`, `summary`, `businessContext`, `language`, `classes`,
-  `functions`, `imports`, `keywords`), calls `askLLM`, strips fences,
-  parses, validates each field via `parseFileAnalysisJson`, falls back
-  to `emptyAnalysis()` on any LLM/parse failure (no retry — BullMQ
-  handles whole-job retry). Language is taken verbatim from the LLM's
-  `language` field; on LLM failure, parse failure, or missing/empty
-  value, falls back to `"unknown"`. Content is **not** truncated — the
-  big-file path handles oversized inputs without losing data.
+  `tokenLen(content)`: above `BIG_FILE_TOKEN_THRESHOLD` →
+  `analyzeBigFile`; otherwise builds the 9-field prompt by
+  interpolating `FILE_ANALYSIS_FIELDS_BLOCK` (`purpose`, `summary`,
+  `businessContext`, `language`, `classes`, `functions`,
+  `importsInternal`, `importsExternal`, `keywords`), calls `askLLM`,
+  strips fences, parses, validates each field via
+  `parseFileAnalysisJson`, falls back to `emptyAnalysis()` on any
+  LLM/parse failure (no retry — BullMQ handles whole-job retry).
+  Language is taken verbatim from the LLM's `language` field; on LLM
+  failure, parse failure, or missing/empty value, falls back to
+  `"unknown"`. Content is **not** truncated — the big-file path handles
+  oversized inputs without losing data.
 - **[bigFile.ts](bigFile.ts)** — `analyzeBigFile(relativePath, content)`
-  for files above the token threshold. Splits content into line-aligned
-  chunks honoring `MAX_TOKENS_PER_CHUNK` (oversized single lines fall
-  through `splitLongLine`'s binary-search character split), calls
-  `askLLM` once per chunk with a chunk-aware variant of the 8-field
-  prompt, then merges chunk results: ≤ `SMALL_FILE_DEDUP_THRESHOLD`
-  chunks → deterministic `dedupAnalyses` (no extra LLM call); larger →
-  `condenseRecursively` map-reduce that fits as many partial analyses
-  as possible into a single `askLLM` condensation call (bounded by
-  `CONDENSE_CONTEXT_LIMIT`), batches when oversized, and recurses on
-  batch results until one analysis remains. Per-chunk and condensation
-  failures fall through to `dedupAnalyses` so the recursion always
-  terminates with a well-formed result. All LLM token usages are summed
-  into a single `AskLlmUsage` (same model end-to-end). Sequential per
-  chunk and per batch — matches the package's per-file sequential
-  invariant.
+  for files above the token threshold. Splits content into strictly
+  line-aligned chunks honoring `MAX_TOKENS_PER_CHUNK` (a line whose own
+  tokens exceed the limit becomes its own oversize chunk — no mid-line
+  splitting; mirrors kube-package's `splitByTokens`). Calls `askLLM`
+  once per chunk with a chunk-aware variant of the same
+  `FILE_ANALYSIS_FIELDS_BLOCK` prompt (only the preamble differs), then
+  merges chunk results: ≤ `SMALL_FILE_DEDUP_THRESHOLD` chunks →
+  deterministic `dedupAnalyses` (unions both `importsInternal` and
+  `importsExternal` independently; no extra LLM call); larger →
+  `condenseRecursively` map-reduce. The condense prompt re-uses
+  `FILE_ANALYSIS_FIELDS_BLOCK` for definitions and appends a separate
+  merge-rules block (drawn from kube-package's `CONDENSE_FIELD_RULES`).
+  Fits as many partial analyses as possible into a single `askLLM`
+  condensation call (bounded by `CONDENSE_CONTEXT_LIMIT`), batches when
+  oversized, and recurses on batch results until one analysis remains.
+  Per-chunk and condensation failures fall through to `dedupAnalyses`
+  so the recursion always terminates with a well-formed result. All
+  LLM token usages are summed into a single `AskLlmUsage` (same model
+  end-to-end). Sequential per chunk and per batch — matches the
+  package's per-file sequential invariant.
 - **[analysisShared.ts](analysisShared.ts)** — module-scoped constants
   (`FALLBACK_LANGUAGE`, `BIG_FILE_TOKEN_THRESHOLD`,
   `MAX_TOKENS_PER_CHUNK`, `CONDENSE_CONTEXT_LIMIT`,
-  `CONDENSE_PROMPT_OVERHEAD`, `SMALL_FILE_DEDUP_THRESHOLD`) and helpers
-  shared by `analyze.ts` and `bigFile.ts`: `estimateTokens` (char/4 —
-  no tiktoken dependency in v1), `tryParse`, `stringArray`,
-  `emptyAnalysis`, and `parseFileAnalysisJson` (the single source of
-  truth for mapping a parsed LLM JSON object onto the 8-field
-  `FileAnalysis` shape).
+  `CONDENSE_PROMPT_OVERHEAD`, `SMALL_FILE_DEDUP_THRESHOLD`), helpers
+  shared by `analyze.ts` and `bigFile.ts` (`tokenLen` re-exported from
+  `@bb/llm`, backed by `tiktoken` with `cl100k_base`; `tryParse`,
+  `stringArray`, `emptyAnalysis`, `parseFileAnalysisJson`), and the
+  `FILE_ANALYSIS_FIELDS_BLOCK` string constant — the **single source
+  of truth** for the 9-field definitions used verbatim across all
+  three prompts (small-file, chunk, condense). Field wording adapted
+  from kube-package's [fileAnalysisFieldDefs.ts](file:///Users/deadbytes/Documents/ByteBell/kube-package/services/knowledge-server/repo/src/knowledge/github/versions/v2/fileAnalysisFieldDefs.ts);
+  `language` is the one explicit deviation (we ask the LLM, kube
+  derives from extension).
 
 ## Module dependency graph
 
