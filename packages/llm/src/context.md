@@ -9,24 +9,41 @@ package-level contract; this file documents how the source tree is split.
   packages may import. Exposes `askLLM` and the `AskLlmOptions` type.
   Anything not re-exported here is internal.
 - **[client.ts](client.ts)** — the `askLLM` implementation. Reads
-  `Config.OpenrouterApiKey` + `Config.OpenrouterModel` via `@bb/config`,
-  builds the `messages` array (optional system prompt + user prompt),
-  POSTs to OpenRouter via Bun's built-in `fetch` with an AbortController
-  timeout, parses the typed `OpenRouterResponse`, returns the first
-  choice's content. Throws `LlmConfigError` if the API key is empty,
-  `LlmError` on timeout / HTTP non-2xx / empty completion.
+  `Config.OpenrouterApiKey`, the primary `Config.OpenrouterModel`, and
+  the four fallback slots `Config.OpenrouterFallbackModel1..4` via
+  `@bb/config`. Builds the deduplicated chain `[primary, ...nonEmpty
+(slot1..4)]`; if the chain has ≥2 entries the request body includes a
+  `models: [...]` array so OpenRouter routes among them natively. Builds
+  the `messages` array (optional system prompt + user prompt), POSTs to
+  OpenRouter via Bun's built-in `fetch` with an AbortController timeout,
+  parses the typed `OpenRouterResponse`, returns the first choice's
+  content. `usage.model` reflects which model OpenRouter actually
+  routed to. Throws `LlmConfigError` if the API key is empty, `LlmError`
+  on timeout / HTTP non-2xx / empty completion.
+- **[tokenizer.ts](tokenizer.ts)** — `tokenLen`, `encodeTokens`,
+  `decodeTokens`. Module-cached `tiktoken` encoder using `cl100k_base`,
+  lazy-initialized via `get_encoding`. All three helpers fall back to
+  char/4 (`tokenLen`) or empty result (`encodeTokens` / `decodeTokens`)
+  if the WASM init fails — pipeline keeps running even on exotic Bun
+  builds.
+- **[pricing.ts](pricing.ts)** — `estimateCostUsd` and
+  `estimateCostFromBreakdown`. One-shot fetch of OpenRouter's
+  `/api/v1/models` (cached for the process lifetime).
 
 ## Module dependency graph
 
 ```
-client.ts → @bb/config (getConfigValue), @bb/types (Config),
-            @bb/errors (LlmConfigError, LlmError)
-            (built-in: fetch, AbortController, setTimeout)
-index.ts  → re-exports the public surface from client.ts
+client.ts    → @bb/config (getConfigValue), @bb/types (Config),
+               @bb/errors (LlmConfigError, LlmError)
+               (built-in: fetch, AbortController, setTimeout)
+tokenizer.ts → tiktoken (npm: get_encoding, Tiktoken type)
+pricing.ts   → @bb/config, @bb/types
+index.ts     → re-exports the public surface from client.ts,
+               tokenizer.ts, pricing.ts
 ```
 
-No cycles, no intra-package leaves yet — `client.ts` is the only
-implementation file.
+No cycles. Each implementation file owns one concern (HTTP, tokens,
+pricing).
 
 ## Invariants enforced here
 

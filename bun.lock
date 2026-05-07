@@ -28,6 +28,7 @@
       "dependencies": {
         "@bb/config": "workspace:*",
         "@bb/errors": "workspace:*",
+        "@bb/logger": "workspace:*",
         "@bb/types": "workspace:*",
         "commander": "^14.0.3",
         "ink": "^7.0.1",
@@ -60,6 +61,7 @@
         "@bb/config": "workspace:*",
         "@bb/errors": "workspace:*",
         "@bb/llm": "workspace:*",
+        "@bb/logger": "workspace:*",
         "@bb/mongo": "workspace:*",
         "@bb/neo4j": "workspace:*",
         "@bb/queue": "workspace:*",
@@ -73,6 +75,7 @@
         "@bb/config": "workspace:*",
         "@bb/errors": "workspace:*",
         "@bb/types": "workspace:*",
+        "tiktoken": "^1.0.22",
       },
     },
     "packages/logger": {
@@ -90,6 +93,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@bb/config": "workspace:*",
+        "@bb/logger": "workspace:*",
         "@bb/neo4j": "workspace:*",
         "@bb/types": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.23.0",
@@ -878,6 +882,8 @@
     "terminal-size": ["terminal-size@4.0.1", "", {}, "sha512-avMLDQpUI9I5XFrklECw1ZEUPJhqzcwSWsyyI8blhRLT+8N1jLJWLWWYQpB2q2xthq8xDvjZPISVh53T/+CLYQ=="],
 
     "text-hex": ["text-hex@1.0.0", "", {}, "sha512-uuVGNWzgJ4yhRaNSiubPY7OjISw4sw4E5Uv0wbjp+OzcbmVU/rsT8ujgcXJhn9ypzsgr5vlzpPqP+MBBKcGvbg=="],
+
+    "tiktoken": ["tiktoken@1.0.22", "", {}, "sha512-PKvy1rVF1RibfF3JlXBSP0Jrcw2uq3yXdgcEXtKTYn3QJ/cBRBHDnrJ5jHky+MENZ6DIPwNUGWpkVx+7joCpNA=="],
 
     "tinyexec": ["tinyexec@1.1.1", "", {}, "sha512-VKS/ZaQhhkKFMANmAOhhXVoIfBXblQxGX1myCQ2faQrfmobMftXeJPcZGp0gS07ocvGJWDLZGyOZDadDBqYIJg=="],
 

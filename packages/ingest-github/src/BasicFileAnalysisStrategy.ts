@@ -1,16 +1,22 @@
 import { createHash } from "node:crypto";
-import { upsertRawFile } from "@bb/mongo";
+import type { ModelTokenBreakdown } from "@bb/types";
+import { updateKnowledgeProgress, upsertRawFile } from "@bb/mongo";
 import { upsertFileNode } from "@bb/neo4j";
-import { walkRepo } from "./scan.ts";
+import { countFiles, walkRepo } from "./scan.ts";
 import { analyzeFile } from "./analyze.ts";
-import type { IngestionContext, IngestionStrategy } from "./Strategy.ts";
+import type { IngestionContext, IngestionResult, IngestionStrategy } from "./Strategy.ts";
 
 export class BasicFileAnalysisStrategy implements IngestionStrategy {
   readonly name = "basic-file-analysis";
 
-  async ingest({ knowledgeId, rootDir }: IngestionContext): Promise<void> {
+  async ingest({ knowledgeId, rootDir }: IngestionContext): Promise<IngestionResult> {
+    const totalFiles = await countFiles(rootDir);
+    await updateKnowledgeProgress(knowledgeId, 0, totalFiles);
+
+    const modelTokens: ModelTokenBreakdown = {};
+    let filesAnalyzed = 0;
     for await (const file of walkRepo(rootDir)) {
-      const { language, analysis } = await analyzeFile(file.relativePath, file.content);
+      const { language, analysis, usage } = await analyzeFile(file.relativePath, file.content);
       const sha = sha256(file.content);
       await upsertRawFile({
         knowledgeId,
@@ -29,8 +35,24 @@ export class BasicFileAnalysisStrategy implements IngestionStrategy {
         sizeBytes: file.sizeBytes,
         analysis,
       });
+      if (usage !== null) {
+        accumulate(modelTokens, usage.model, usage.inputTokens, usage.outputTokens);
+      }
+      filesAnalyzed += 1;
+      await updateKnowledgeProgress(knowledgeId, filesAnalyzed);
     }
+    return { filesAnalyzed, modelTokens };
   }
+}
+
+function accumulate(totals: ModelTokenBreakdown, model: string, inputTokens: number, outputTokens: number): void {
+  const existing = totals[model];
+  if (existing === undefined) {
+    totals[model] = { inputTokens, outputTokens };
+    return;
+  }
+  existing.inputTokens += inputTokens;
+  existing.outputTokens += outputTokens;
 }
 
 function sha256(content: string): string {

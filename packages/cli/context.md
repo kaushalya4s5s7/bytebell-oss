@@ -21,7 +21,7 @@ mode, every invocation is interactive in spirit, with subcommands for
 indexing, configuration, server lifecycle, and inspection.
 
 **v0 surface:** `set`, `boot`, `shutdown`, `server start`, `index`,
-`ingest`, `ls`.
+`ingest`, `ls`, `delete`, `stats`.
 
 - `bytebell set <key> <value>` — headless write to
   `~/.bytebell/config.json` via `@bb/config.setConfigValue`. Type
@@ -52,17 +52,24 @@ infra/docker/docker-compose.yml up -d`, polls
 - `bytebell index <git-url>` / `bytebell ingest [path]` / `bytebell ls`
   — talk HTTP to a running server (lazy-spawn via
   `serverSpawn.ensureServerRunning` when the daemon is down).
+- `bytebell delete` — list indexed knowledge in an Ink arrow-key picker
+  (`DeleteSelector.tsx`, plain `useInput` — no extra dep), and on
+  confirm `DELETE /api/v1/repos/:id` against the running server. The
+  server cancels any pending BullMQ jobs, then `DETACH DELETE`s the
+  Neo4j subgraph and removes the Mongo `knowledge` / `raw` /
+  `processing_stats` rows for that id.
+- `bytebell stats` — `GET /api/v1/stats` and render TOTALS / REPOS /
+  COMMITS tables. Cost is per-model OpenRouter pricing computed
+  server-side; rows with unknown pricing render as `unknown`.
 - `bytebell --help` / `--version` — commander defaults.
 
 The package does **not** own:
 
 - Any other subcommand (index, ls, clean, models, keys, cost, server,
-  mcp, telemetry, update) — all deferred per the catalog below.
+  mcp, update) — all deferred per the catalog below.
 - Live infra connection probes — the CLI cannot import `@bb/mongo` /
   `@bb/redis` per the tier rule. Format-only validation in v0; future
   `bytebell config doctor` will probe via a running server.
-- License issuance ([docs/arch.md:96-99](../../docs/arch.md#L96-L99)) —
-  separate subsystem.
 - The Ink dashboard (`bytebell` no-args) — needs the server's HTTP API
   - activity feed.
 - OpenRouter API key handling — own subcommand (`bytebell keys set`)
@@ -145,9 +152,10 @@ will touch when implemented. Only the **bolded** entries ship in v0.
 | **`bytebell index <git-url>`**                   | **POST `/api/v1/github/index` to local server.**                                                                     | **Shipped**                                 |
 | **`bytebell ingest [path]`**                     | **POST `/api/v1/local/index` for a directory tree.**                                                                 | **Shipped**                                 |
 | **`bytebell ls`**                                | **Render `/api/v1/repos` as a table.**                                                                               | **Shipped**                                 |
+| **`bytebell delete`**                            | **Ink picker over `/api/v1/repos`, then DELETE `/api/v1/repos/:id` (Mongo + Neo4j + jobs).**                         | **Shipped**                                 |
+| **`bytebell stats`**                             | **Render `/api/v1/stats` (totals + per-repo + per-commit token / cost rows).**                                       | **Shipped**                                 |
 | `bytebell`                                       | Ink dashboard with Repos / Server / Activity / Cost panes ([docs/arch.md:172-184](../../docs/arch.md#L172-L184))     | After `@bb/server` HTTP API + activity feed |
 | `bytebell` (first-run auto-launch of setup form) | If `isConfigComplete()` returns false, redirect to `bytebell set` form ([docs/arch.md:170](../../docs/arch.md#L170)) | After dashboard lands                       |
-| `bytebell clean <id-or-name>`                    | Confirm prompt → DELETE via server admin route                                                                       | After `@bb/server` clean route              |
 | `bytebell models set <model-id>`                 | Validate model via OpenRouter API + write `openrouter_model`                                                         | After OpenRouter helper                     |
 | `bytebell models ls`                             | Curated 5-10 models, on-the-fly OpenRouter pricing                                                                   | Same                                        |
 | `bytebell keys set`                              | Interactive masked prompt → `keytar` keychain → write key                                                            | After `keytar` integration                  |
@@ -155,7 +163,6 @@ will touch when implemented. Only the **bolded** entries ship in v0.
 | `bytebell server stop \| status \| logs`         | Kill / inspect `bytebell-server`, tail server logs (start is shipped — see above)                                    | After `@bb/server` health surface           |
 | `bytebell mcp`                                   | Print MCP endpoint URL + sample MCP-client config                                                                    | After dashboard pane                        |
 | `bytebell infra up \| down \| status \| logs`    | Thin wrapper over `docker compose` for users who want explicit infra control                                         | If usage demands it post-v0                 |
-| `bytebell telemetry status`                      | Read telemetry buffer ndjson stats                                                                                   | After `@bb/telemetry`                       |
 | `bytebell update`                                | Detect install method, run matching update, restart server                                                           | Release-engineering follow-up               |
 
 ## What is intentionally out of scope (v0)
@@ -165,7 +172,6 @@ will touch when implemented. Only the **bolded** entries ship in v0.
 - Live connection probes inside the setup form
 - First-run auto-launch of setup form (needs the dashboard pane first)
 - OpenRouter API key in the setup form (separate `bytebell keys set`)
-- License auto-issue on first run
 - Tests — workspace has no test infra yet
 - Color theming via `kleur` / `picocolors` — manual ANSI for now
 - Distinct exit codes per failure mode (today: `1` = typed/handled error,

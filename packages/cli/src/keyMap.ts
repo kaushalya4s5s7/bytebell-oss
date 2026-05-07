@@ -92,6 +92,26 @@ export const KEY_MAP: Record<string, KeyEntry> = {
     redact: false,
     setter: (s) => setConfigValue(Config.OpenrouterModel, s),
   },
+  "openrouter-fallback-model-1": {
+    configKey: Config.OpenrouterFallbackModel1,
+    redact: false,
+    setter: (s) => setConfigValue(Config.OpenrouterFallbackModel1, s),
+  },
+  "openrouter-fallback-model-2": {
+    configKey: Config.OpenrouterFallbackModel2,
+    redact: false,
+    setter: (s) => setConfigValue(Config.OpenrouterFallbackModel2, s),
+  },
+  "openrouter-fallback-model-3": {
+    configKey: Config.OpenrouterFallbackModel3,
+    redact: false,
+    setter: (s) => setConfigValue(Config.OpenrouterFallbackModel3, s),
+  },
+  "openrouter-fallback-model-4": {
+    configKey: Config.OpenrouterFallbackModel4,
+    redact: false,
+    setter: (s) => setConfigValue(Config.OpenrouterFallbackModel4, s),
+  },
 };
 
 export function validKeysList(): string[] {

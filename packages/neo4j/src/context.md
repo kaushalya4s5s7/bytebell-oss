@@ -9,10 +9,12 @@ package-level contract; this file documents how the source tree is split.
   other packages may import. Exposes the lifecycle (`connectNeo4j`,
   `closeNeo4j`, `pingNeo4j`), schema bootstrap
   (`ensureKnowledgeIndexes`), typed graph helpers (`upsertKnowledgeNode`,
-  `setKnowledgeStateInGraph`, `upsertFileNode`), and the public read
+  `setKnowledgeStateInGraph`, `upsertFileNode`), the public read
   primitive `runCypher` (a re-export of the internal `_runCypher` for
-  domain-tier consumers). Plus the `PingResult` and `UpsertFileNodeInput`
-  types. Anything not re-exported here is internal.
+  domain-tier consumers), and the integer coercion `toNeo4jInt(n)` for
+  any JS number bound into a Cypher `LIMIT`/`SKIP` clause. Plus the
+  `PingResult` and `UpsertFileNodeInput` types. Anything not re-exported
+  here is internal.
 - **[client.ts](client.ts)** — module-scoped `Driver` singleton +
   lifecycle (`connectNeo4j`, `closeNeo4j`), the health probe (`pingNeo4j`,
   via `verifyConnectivity()`), the **internal** `_getDriver()` accessor
@@ -43,11 +45,14 @@ branch / repoName / state / createdAt / updatedAt` (createdAt only on
   1. MERGE `:File {knowledgeId, relativePath}`, SET its scalar props,
      MERGE the `:HAS_FILE` rel from the parent `:Knowledge`.
   2. DELETE all existing `:HAS_KEYWORD / :HAS_CLASS / :HAS_FUNCTION /
-:HAS_IMPORT` rels so re-runs produce a clean entity attachment.
+:HAS_IMPORT_INTERNAL / :HAS_IMPORT_EXTERNAL` rels so re-runs produce
+     a clean entity attachment.
   3. UNWIND keywords (lowercased) → MERGE `:Keyword` + MERGE
      `:HAS_KEYWORD` rel.
   4. UNWIND classes → MERGE `:Class {signature}` + rel.
-  5. Same for functions and imports.
+  5. Same for functions; imports split into two passes — `importsInternal`
+     attaches `:HAS_IMPORT_INTERNAL`, `importsExternal` attaches
+     `:HAS_IMPORT_EXTERNAL`. Both target the shared `:Module {name}` node.
 
   Each entity attachment runs in its own session (one network round-trip
   per group). Skipped entirely if the corresponding analysis array is
@@ -86,6 +91,11 @@ No cycles. `client.ts` is the single root all helpers compose against.
 - **No env reads.** Only `getConfigValue(Config.Neo4j*)` provides creds.
 - **Errors carry typed metadata.** Construction sites use the catalog
   in `@bb/errors` — never inline `new Error(string)`.
+- **Cypher `LIMIT`/`SKIP` params are integers.** The JS driver maps
+  bare `number` to Cypher `Float`, which Neo4j 5 rejects in `LIMIT`/
+  `SKIP`. Callers must wrap any numeric bound used in those clauses
+  with `toNeo4jInt(n)`. The wrapper returns a driver `Integer` that the
+  driver serialises correctly.
 
 ## Adding a helper
 

@@ -11,8 +11,8 @@ Local, single-tenant knowledge engine. Ingests GitHub repos into a Neo4j graph a
 ## Install
 
 ```bash
-git clone https://github.com/your-org/bytebell-public.git
-cd bytebell-public
+git clone https://github.com/ByteBell/Bytebell-oss.git
+cd Bytebell-oss
 bun install
 cd packages/cli && bun link && cd ../..
 ```
@@ -76,6 +76,22 @@ You can also ingest a local directory:
 bytebell ingest /path/to/source-tree
 ```
 
+## Inspect token & cost stats
+
+```bash
+bytebell stats
+```
+
+Shows totals (input tokens, output tokens, estimated USD cost), a per-repo breakdown, and per-commit rows including processing time and files analysed. Cost is computed against live OpenRouter pricing; entries whose model has no published pricing show as `unknown`.
+
+## Delete an indexed entry
+
+```bash
+bytebell delete
+```
+
+Lists every indexed knowledge entry as an arrow-keyable picker. Selecting one and confirming `y` cancels any pending BullMQ jobs for that knowledge, removes the Knowledge subgraph from Neo4j (`DETACH DELETE`), and removes the Mongo `knowledge`, `raw`, and `processing_stats` rows tagged with that id. Press `Esc` (or `n` at the confirm step) to cancel.
+
 ## Connect an MCP client
 
 The MCP endpoint is at `http://127.0.0.1:8080/mcp` (Streamable HTTP). For Claude Code:
@@ -124,4 +140,10 @@ Add `-v` to also drop the named volumes (destroys all indexed data).
 
 ## License
 
-Open source under the project's licence — but the running server is meant for local single-tenant use. No remote network surface; everything binds to `127.0.0.1`.
+Bytebell is released under **AGPL-3.0 with an additional non-commercial use clause** — see [LICENSE](LICENSE) for the authoritative text.
+
+- Personal, academic, research, and non-profit use are unrestricted under AGPL-3.0 (network-copyleft applies — see the LICENSE file for what that means in practice).
+- **Commercial use** — including use by or on behalf of a for-profit entity, or any use that generates revenue — is covered by ByteBell's separately-licensed **Enterprise** edition (commercial-use grant + additional features + support). Contact `saurav@bytebell.ai`.
+- The running server itself does **not** verify a license; governance is by license terms, not by code.
+
+The server is meant for local single-tenant use. No remote network surface; everything binds to `127.0.0.1`.
