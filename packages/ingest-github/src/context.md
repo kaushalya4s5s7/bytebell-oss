@@ -17,8 +17,10 @@ split.
   semantic chunking, etc.).
 - **[BasicFileAnalysisStrategy.ts](BasicFileAnalysisStrategy.ts)** —
   the v1 default strategy. Iterates `walkRepo(rootDir)`; per file,
-  calls `analyzeFile(relativePath, content)` for the 7-field LLM
-  analysis, computes a sha-256, then dual-writes:
+  calls `analyzeFile(relativePath, content)` for the 8-field LLM
+  analysis (small-file path) or chunked + condensed analysis
+  (big-file path, transparent to the strategy), computes a sha-256,
+  then dual-writes:
   - `upsertRawFile` to Mongo's `raw` collection
   - `upsertFileNode` to Neo4j (creates `:File` + clears stale
     `:HAS_KEYWORD / :HAS_CLASS / :HAS_FUNCTION / :HAS_IMPORT` rels +
@@ -60,14 +62,43 @@ gitToken? })`. Delegates to `node:child_process.execFile` (no shell,
   lockfiles); binary-extension blocklist; size cap of 1 MB; null-byte
   heuristic on the first 4 KB as final UTF-8 sanity check. Constant
   memory — `node:fs/promises.opendir` recursive descent.
-- **[analyze.ts](analyze.ts)** — `analyzeFile(relativePath, content)`
-  returns `{ language, analysis }`. Builds the 7-field stripped prompt,
-  calls `askLLM`, strips fences, parses, validates each field, falls
-  back to `emptyAnalysis()` on any LLM/parse failure (no retry — BullMQ
+- **[analyze.ts](analyze.ts)** — public entry: `analyzeFile(relativePath,
+content)` returns `{ language, analysis, usage }`. Routes per file by
+  `estimateTokens(content)`: above `BIG_FILE_TOKEN_THRESHOLD` →
+  `analyzeBigFile`; otherwise builds the 8-field prompt
+  (`purpose`, `summary`, `businessContext`, `language`, `classes`,
+  `functions`, `imports`, `keywords`), calls `askLLM`, strips fences,
+  parses, validates each field via `parseFileAnalysisJson`, falls back
+  to `emptyAnalysis()` on any LLM/parse failure (no retry — BullMQ
   handles whole-job retry). Language is taken verbatim from the LLM's
   `language` field; on LLM failure, parse failure, or missing/empty
-  value, falls back to `"unknown"`. Content truncated at 60 KB before
-  prompting.
+  value, falls back to `"unknown"`. Content is **not** truncated — the
+  big-file path handles oversized inputs without losing data.
+- **[bigFile.ts](bigFile.ts)** — `analyzeBigFile(relativePath, content)`
+  for files above the token threshold. Splits content into line-aligned
+  chunks honoring `MAX_TOKENS_PER_CHUNK` (oversized single lines fall
+  through `splitLongLine`'s binary-search character split), calls
+  `askLLM` once per chunk with a chunk-aware variant of the 8-field
+  prompt, then merges chunk results: ≤ `SMALL_FILE_DEDUP_THRESHOLD`
+  chunks → deterministic `dedupAnalyses` (no extra LLM call); larger →
+  `condenseRecursively` map-reduce that fits as many partial analyses
+  as possible into a single `askLLM` condensation call (bounded by
+  `CONDENSE_CONTEXT_LIMIT`), batches when oversized, and recurses on
+  batch results until one analysis remains. Per-chunk and condensation
+  failures fall through to `dedupAnalyses` so the recursion always
+  terminates with a well-formed result. All LLM token usages are summed
+  into a single `AskLlmUsage` (same model end-to-end). Sequential per
+  chunk and per batch — matches the package's per-file sequential
+  invariant.
+- **[analysisShared.ts](analysisShared.ts)** — module-scoped constants
+  (`FALLBACK_LANGUAGE`, `BIG_FILE_TOKEN_THRESHOLD`,
+  `MAX_TOKENS_PER_CHUNK`, `CONDENSE_CONTEXT_LIMIT`,
+  `CONDENSE_PROMPT_OVERHEAD`, `SMALL_FILE_DEDUP_THRESHOLD`) and helpers
+  shared by `analyze.ts` and `bigFile.ts`: `estimateTokens` (char/4 —
+  no tiktoken dependency in v1), `tryParse`, `stringArray`,
+  `emptyAnalysis`, and `parseFileAnalysisJson` (the single source of
+  truth for mapping a parsed LLM JSON object onto the 8-field
+  `FileAnalysis` shape).
 
 ## Module dependency graph
 
@@ -76,7 +107,11 @@ paths.ts                       → @bb/config, node:fs/promises, node:path
 clone.ts                       → @bb/errors, node:child_process, node:fs/promises,
                                  node:path, node:util
 scan.ts                        → node:fs/promises, node:path
-analyze.ts                     → @bb/llm, @bb/mongo (FileAnalysis type)
+analysisShared.ts              → @bb/mongo (FileAnalysis type)
+analyze.ts                     → @bb/llm, @bb/mongo (FileAnalysis type),
+                                 analysisShared.ts, bigFile.ts
+bigFile.ts                     → @bb/llm, @bb/mongo (FileAnalysis type),
+                                 analysisShared.ts
 Strategy.ts                    → (leaf — type-only, no imports)
 BasicFileAnalysisStrategy.ts   → @bb/mongo (upsertRawFile),
                                  @bb/neo4j (upsertFileNode),

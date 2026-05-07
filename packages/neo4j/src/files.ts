@@ -8,6 +8,7 @@ SET f.language = $language,
     f.sizeBytes = $sizeBytes,
     f.purpose = $purpose,
     f.summary = $summary,
+    f.businessContext = $businessContext,
     f.updatedAt = $updatedAt
 WITH f
 MATCH (k:Knowledge {knowledgeId: $knowledgeId})
@@ -80,6 +81,7 @@ export async function upsertFileNode(input: UpsertFileNodeInput): Promise<void> 
     sizeBytes: input.sizeBytes,
     purpose: input.analysis.purpose,
     summary: input.analysis.summary,
+    businessContext: input.analysis.businessContext,
     updatedAt: new Date().toISOString(),
   });
 

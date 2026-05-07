@@ -95,7 +95,7 @@ session.
 ```
 (:Knowledge {knowledgeId, sourceKind, sourceUrl, branch, repoName, state, createdAt, updatedAt})
   -[:HAS_FILE]->
-(:File {knowledgeId, relativePath, language, sha, sizeBytes, purpose, summary, updatedAt})
+(:File {knowledgeId, relativePath, language, sha, sizeBytes, purpose, summary, businessContext, updatedAt})
   -[:HAS_KEYWORD]->  (:Keyword  {name})         // global, lowercase, MERGE-deduped
   -[:HAS_CLASS]->    (:Class    {signature})    // global, MERGE-deduped
   -[:HAS_FUNCTION]-> (:Function {signature})    // global, MERGE-deduped

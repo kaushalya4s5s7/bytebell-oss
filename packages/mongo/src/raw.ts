@@ -4,6 +4,7 @@ import { Collections } from "./collections.ts";
 export interface FileAnalysis {
   purpose: string;
   summary: string;
+  businessContext: string;
   classes: string[];
   functions: string[];
   imports: string[];

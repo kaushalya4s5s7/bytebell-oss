@@ -27,7 +27,8 @@ The package owns:
   disk under `~/.bytebell/repos/<knowledgeId>/` for future `git_pull`
 - The hardcoded ignore list (directories, lockfiles, binary extensions,
   size cap) for repo scanning
-- The 7-field per-file LLM analysis prompt
+- The 8-field per-file LLM analysis prompt (small-file path) and the
+  chunked + condensed analysis path for files above the token threshold
 - Translation of LLM output JSON → `RawFileDoc` shape (Mongo) **and**
   `:File` graph node + entity relationships (Neo4j), with safe fallbacks
   for malformed responses
@@ -88,8 +89,10 @@ worker hardcodes a single `IngestionStrategy` instance (currently
 ## Invariants
 
 1. **Sequential per-file processing.** Intentionally degraded; one
-   `askLLM` + one `upsertRawFile` per file. No `Promise.all`, no
-   concurrency cap. Revisit when the latency profile demands it.
+   `upsertRawFile` per file. The small-file path issues one `askLLM`;
+   the big-file path issues N (one per chunk) plus condensation calls,
+   all sequential — no `Promise.all`, no concurrency cap. Revisit when
+   the latency profile demands it.
 2. **Clone idempotent.** Re-runs (BullMQ retries) call `git fetch` +
    `git reset --hard` in the existing dir rather than re-cloning.
    Tokens are re-injected into the remote URL each time.
@@ -102,8 +105,12 @@ worker hardcodes a single `IngestionStrategy` instance (currently
    then re-throws so BullMQ records the retry.
 5. **Fail-soft analysis, fail-hard infra.** A single file's LLM call
    failing falls back to an empty-analysis Raw doc and processing
-   continues. A clone failure or Mongo write failure throws and propagates
-   to BullMQ for retry under the queue's `attempts: 3`.
+   continues. In the big-file path, a single chunk failure contributes
+   an empty analysis to the merge but does not stop the file; a
+   condensation-call failure falls through to deterministic
+   `dedupAnalyses` so the merged result is always well-formed. A clone
+   failure or Mongo write failure throws and propagates to BullMQ for
+   retry under the queue's `attempts: 3`.
 6. **Hardcoded filters only.** No LLM-based ignore decisions in v0. The
    directory / file / extension blocklists in `scan.ts` are the only
    way files get skipped.
@@ -128,14 +135,17 @@ worker hardcodes a single `IngestionStrategy` instance (currently
 - Concurrency control / parallel file processing
 - Folder-level summaries / `repoSummary.json` / `flat-folder` strategy
 - Semantic chunking (`SemanticChunker`)
-- Big-file handling (>1 MB files are skipped, not chunked)
+- Per-chunk persistence (we persist only the merged file-level
+  `FileAnalysis`; future MCP retrieval may want per-chunk Raw docs and
+  `:Chunk` Neo4j nodes — non-breaking add)
 - Smart file processor tiers (FULL / SMART_SAMPLE / METADATA_ONLY)
 - Recovery / `ProcessingStateManager`
 - Progress reporting / heartbeats
 - Failed-files tracker
 - Adaptive memory manager
-- Comprehensive 17-field LLM analysis (we ship 7: `purpose`, `summary`,
-  `language`, `classes`, `functions`, `imports`, `keywords`)
+- Comprehensive 17-field LLM analysis (we ship 8: `purpose`, `summary`,
+  `businessContext`, `language`, `classes`, `functions`, `imports`,
+  `keywords`)
 - Model escalation
 - LLM-based ignore decisions
 - Cost ledger (the `@bb/llm` package itself doesn't have one yet)
