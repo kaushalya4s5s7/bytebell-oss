@@ -11,8 +11,8 @@ Local, single-tenant knowledge engine. Ingests GitHub repos into a Neo4j graph a
 ## Install
 
 ```bash
-git clone https://github.com/your-org/bytebell-public.git
-cd bytebell-public
+git clone https://github.com/ByteBell/Bytebell-oss.git
+cd Bytebell-oss
 bun install
 cd packages/cli && bun link && cd ../..
 ```
