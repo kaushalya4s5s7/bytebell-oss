@@ -12,7 +12,7 @@ All notable changes to Bytebell are documented in this file. The format is based
 - `bytebell-server` HTTP daemon (Express 5) with ingestion routes (`/api/v1/...`) and MCP transport (`/mcp`, HTTP + SSE).
 - `bytebell` CLI (Ink/React TUI + commander) with subcommands: `boot`, `index`, `ingest`, `pull`, `ls`, `delete`, `set`, `server`, `shutdown`, `stats`, `mcp`.
 - GitHub repository ingestion via `BasicFileAnalysisStrategy` (file-walk + per-file LLM analysis).
-- MCP retrieval tools: `smart_search`, `keyword_lookup`, `retrieve_file`, `retrieve_pdf_page`, `graph_search`, `graph_traverse`, `get_repo_hubs`, `cypher`.
+- MCP retrieval tools: `smart_search`, `keyword_lookup`, `retrieve_file` .
 - Token-usage telemetry persisted to MongoDB (`mcp_activity`, `usage_summary`); live USD estimate against OpenRouter pricing via `bytebell stats`.
 - Local-first single-tenant architecture (`orgId="local"`); BYO MongoDB + Neo4j + Redis.
 - Configuration via `~/.bytebell/config.json` (no `.env`), managed through `bytebell set <key> <value>`.
