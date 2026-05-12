@@ -73,8 +73,16 @@ export const REQUIRED_KEYS: readonly Config[] = [
   Config.Neo4jUser,
   Config.Neo4jPassword,
   Config.RedisUrl,
-  Config.OpenrouterApiKey,
 ];
+
+const PROVIDER_REQUIRED_KEYS: Readonly<Record<LlmProvider, readonly Config[]>> = {
+  openrouter: [Config.OpenrouterApiKey],
+  ollama: [Config.OllamaUrl, Config.OllamaModel],
+};
+
+export function requiredKeysFor(provider: LlmProvider): readonly Config[] {
+  return [...REQUIRED_KEYS, ...PROVIDER_REQUIRED_KEYS[provider]];
+}
 
 export const HINTS: Readonly<Record<Config, string>> = {
   [Config.ServerPort]: "bytebell set port <n>",

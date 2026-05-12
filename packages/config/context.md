@@ -110,7 +110,9 @@ To add a new config key:
 1. Add a new `Config` enum entry in `src/schema.ts`.
 2. Add the field to `configSchema` with a `.default(...)`.
 3. Add a `ConfigValueMap` entry mapping the enum to its TS type.
-4. If required, add the enum to `REQUIRED_KEYS`.
+4. If required, add the enum to `REQUIRED_KEYS` (infra-always) or to
+   `PROVIDER_REQUIRED_KEYS[<provider>]` (provider-specific — driven by
+   `Config.LlmProvider` at completeness-check time).
 5. Add a hint string to `HINTS`.
 6. Add cases to `readField` and `writeField`.
 7. Update this `context.md` if the new key changes invariants or ownership.
