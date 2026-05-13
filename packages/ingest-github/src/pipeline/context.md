@@ -22,10 +22,20 @@ Domain (sub-folder of `@bb/ingest-github`).
 - `filters.ts` — `SKIP_DIRS`, `SKIP_FILES`, `BINARY_EXTENSIONS`, `looksBinary`,
   `passesPathFilters`. Pure data; no I/O.
 - `scan.ts` — async generator `scanRepository(rootDir)` yielding `ScanEntry`
-  (`kind: "file"` or `kind: "oversized"`). Oversized = larger than
-  `Config.AbsoluteFileSizeCap` or `> 1 MiB` (small-file hard cap, kept
-  in-memory load bounded). `readScannedFile` re-reads a file by absolute path
-  for the big-file phase which streams content lazily.
+  (`kind: "file"` or `kind: "oversized"`). A file is `oversized` when its
+  byte size exceeds `Config.AbsoluteFileSizeCap` (skipped before read) or
+  when its line count exceeds `Config.BigFileLineThreshold` (default 1200;
+  enters the big-file phase). Both thresholds are config-driven — no
+  magic numbers in this file. `readScannedFile` re-reads a file by
+  absolute path for the big-file phase which streams content lazily.
+- `run.ts` — `createPipelineRunner({ reposRootDir, strategy })` builds an
+  `IngestRunnerDeps` that dispatches on payload shape: GitHub payloads go
+  through clone + branch resolve + strategy execute + commit persistence;
+  local payloads skip the clone. `resolveOrgId(payload)` returns
+  `payload.orgId ?? getConfigValue(Config.OrgId)` — the only place orgId
+  is resolved. State transitions (`CREATED → QUEUED → INGESTED → …`) are
+  persisted to Mongo + Neo4j via `transitionState`, and
+  `CancellationError` is re-thrown without flipping to FAILED.
 - `branch.ts` — `resolveBranch(knowledgeId, payload)`. Defaults to `main` when
   the payload omits it; rejects branch names that don't match `^[\w./-]+$`
   with `IngestError` (defence against shell-injection into git args).
@@ -41,14 +51,22 @@ Domain (sub-folder of `@bb/ingest-github`).
 ## Imports allowed
 
 - Sibling files in this folder may import each other.
-- Down: `../types/*` only.
-- Up: `@bb/config`, `@bb/types`, `@bb/errors`, `node:*`.
+- Down: `src/types/*` only (intra-package, via the `src/*` alias).
+- Up: `@bb/config`, `@bb/types`, `@bb/errors`, `@bb/logger`, `node:*`.
+- `run.ts` additionally imports `@bb/mongo`, `@bb/neo4j`, and `@bb/llm`
+  for state transitions, graph state writes, and cost estimation
+  respectively — it is the orchestrator that owns those side effects so
+  the strategies stay pure.
 - Forbidden: importing from `../strategies`, `../adapters`, `../handlers`.
 
 ## Invariants
 
 - Every file is ≤ 300 lines.
-- No LLM imports, no graph imports, no Mongo writes here. Those live one tier
-  up under `strategies/` (LLM, prompts) or in adapters.
+- No LLM prompt construction, no graph traversal, no per-file Mongo
+  writes happen here — those live under `strategies/`. `run.ts` only
+  performs end-of-pipeline state transitions and stats persistence.
 - `scanRepository` never blocks the event loop on a large repo: it streams via
   `opendir` + per-file `readFile`; it never buffers the full tree.
+- Tunable scan thresholds (`Config.AbsoluteFileSizeCap`,
+  `Config.BigFileLineThreshold`) are read from `@bb/config` — never
+  declared as in-file constants. Same for `Config.OrgId` in `run.ts`.

@@ -19,8 +19,12 @@ drift apart.
   `buildRepoMergePrompt`, `repoFolderInfosFrom`.
 - `backfill.ts` — `BACKFILL_SYSTEM_PROMPT` + `buildBackfillUserPrompt`,
   used by the phase-3 backfill pass under `../backfill/fields.ts` to
-  re-derive `keywords`, `sideEffects`, `configDependencies`, and
-  `dataFlowDirection` when condense leaves them empty.
+  re-derive the full extended-field set when condense leaves them
+  empty: `keywords`, `ontologyConcepts`, `businessEntities`,
+  `systemCapabilities`, `sideEffects`, `configDependencies`,
+  `dataFlowDirection`, `integrationSurface`, `contractsProvided`,
+  `contractsConsumed`, `sectionMap`. The prompt mirrors the field
+  block in `file-analysis-fields.ts` so the two stay in lockstep.
 
 ## Invariants
 

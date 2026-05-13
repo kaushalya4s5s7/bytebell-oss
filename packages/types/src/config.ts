@@ -23,4 +23,6 @@ export enum Config {
   CondenseContextLimit = "condense.context.limit",
   CondensePromptOverhead = "condense.prompt.overhead",
   SmallFileDedupThreshold = "small.file.dedup.threshold",
+  BigFileLineThreshold = "big.file.line.threshold",
+  OrgId = "org_id",
 }

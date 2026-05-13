@@ -1,15 +1,43 @@
 import { askJsonLLM } from "@bb/llm";
 import { logger } from "@bb/logger";
+import type { FileAnalysis, FileAnalysisSection } from "@bb/mongo";
 import type { MetaPaths } from "src/types/meta-paths.ts";
 import { iterateCondensed } from "src/strategies/flat-folder/big-file/storage.ts";
 import { saveCondensed } from "src/strategies/flat-folder/big-file/storage.ts";
 import { BACKFILL_SYSTEM_PROMPT, buildBackfillUserPrompt } from "src/strategies/flat-folder/prompts/backfill.ts";
 
+const EXTENDED_ARRAY_KEYS = [
+  "ontologyConcepts",
+  "businessEntities",
+  "systemCapabilities",
+  "sideEffects",
+  "configDependencies",
+  "integrationSurface",
+  "contractsProvided",
+  "contractsConsumed",
+] as const;
+
+type ExtendedArrayKey = (typeof EXTENDED_ARRAY_KEYS)[number];
+
 interface BackfillJson {
   keywords?: unknown;
+  ontologyConcepts?: unknown;
+  businessEntities?: unknown;
+  systemCapabilities?: unknown;
   sideEffects?: unknown;
   configDependencies?: unknown;
   dataFlowDirection?: unknown;
+  integrationSurface?: unknown;
+  contractsProvided?: unknown;
+  contractsConsumed?: unknown;
+  sectionMap?: unknown;
+}
+
+interface NeededFlags {
+  keywords: boolean;
+  arrays: Record<ExtendedArrayKey, boolean>;
+  dataFlow: boolean;
+  sectionMap: boolean;
 }
 
 export async function backfillMissingFields(metaPaths: MetaPaths): Promise<{ updated: number; failed: number }> {
@@ -17,11 +45,8 @@ export async function backfillMissingFields(metaPaths: MetaPaths): Promise<{ upd
   let failed = 0;
   for await (const entry of iterateCondensed(metaPaths)) {
     const a = entry.analysis;
-    const needsKeywords = a.keywords.length === 0;
-    const needsSideEffects = a.sideEffects === undefined || a.sideEffects.length === 0;
-    const needsConfigDeps = a.configDependencies === undefined || a.configDependencies.length === 0;
-    const needsDataFlow = a.dataFlowDirection === undefined || a.dataFlowDirection.length === 0;
-    if (!needsKeywords && !needsSideEffects && !needsConfigDeps && !needsDataFlow) {
+    const needed = computeNeeded(a);
+    if (!hasAnyMissing(needed)) {
       continue;
     }
     const userPrompt = buildBackfillUserPrompt(entry.relativePath, entry.analysis);
@@ -31,18 +56,7 @@ export async function backfillMissingFields(metaPaths: MetaPaths): Promise<{ upd
       if (result === null) {
         continue;
       }
-      if (needsKeywords) {
-        a.keywords = pickStringArray(result.keywords);
-      }
-      if (needsSideEffects) {
-        a.sideEffects = pickStringArray(result.sideEffects);
-      }
-      if (needsConfigDeps) {
-        a.configDependencies = pickStringArray(result.configDependencies);
-      }
-      if (needsDataFlow && typeof result.dataFlowDirection === "string") {
-        a.dataFlowDirection = result.dataFlowDirection;
-      }
+      applyBackfill(a, result, needed);
       await saveCondensed(metaPaths, entry);
       updated += 1;
     } catch (cause: unknown) {
@@ -54,6 +68,55 @@ export async function backfillMissingFields(metaPaths: MetaPaths): Promise<{ upd
   return { updated, failed };
 }
 
+function computeNeeded(a: FileAnalysis): NeededFlags {
+  const arrays = {} as Record<ExtendedArrayKey, boolean>;
+  for (const key of EXTENDED_ARRAY_KEYS) {
+    const value = a[key];
+    arrays[key] = value === undefined || value.length === 0;
+  }
+  return {
+    keywords: a.keywords.length === 0,
+    arrays,
+    dataFlow: a.dataFlowDirection === undefined || a.dataFlowDirection.length === 0,
+    sectionMap: a.sectionMap === undefined || a.sectionMap.length === 0,
+  };
+}
+
+function hasAnyMissing(needed: NeededFlags): boolean {
+  if (needed.keywords || needed.dataFlow || needed.sectionMap) {
+    return true;
+  }
+  for (const key of EXTENDED_ARRAY_KEYS) {
+    if (needed.arrays[key]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function applyBackfill(a: FileAnalysis, result: BackfillJson, needed: NeededFlags): void {
+  if (needed.keywords) {
+    a.keywords = pickStringArray(result.keywords);
+  }
+  for (const key of EXTENDED_ARRAY_KEYS) {
+    if (needed.arrays[key]) {
+      const next = pickStringArray(result[key]);
+      if (next.length > 0) {
+        a[key] = next;
+      }
+    }
+  }
+  if (needed.dataFlow && typeof result.dataFlowDirection === "string" && result.dataFlowDirection.length > 0) {
+    a.dataFlowDirection = result.dataFlowDirection;
+  }
+  if (needed.sectionMap) {
+    const sections = pickSections(result.sectionMap);
+    if (sections.length > 0) {
+      a.sectionMap = sections;
+    }
+  }
+}
+
 function pickStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
@@ -62,6 +125,25 @@ function pickStringArray(value: unknown): string[] {
   for (const item of value) {
     if (typeof item === "string" && item.length > 0) {
       out.push(item);
+    }
+  }
+  return out;
+}
+
+function pickSections(value: unknown): FileAnalysisSection[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out: FileAnalysisSection[] = [];
+  for (const item of value) {
+    if (typeof item !== "object" || item === null) {
+      continue;
+    }
+    const rec = item as Record<string, unknown>;
+    const name = typeof rec["name"] === "string" ? rec["name"] : "";
+    const description = typeof rec["description"] === "string" ? rec["description"] : "";
+    if (name.length > 0 || description.length > 0) {
+      out.push({ name, description });
     }
   }
   return out;

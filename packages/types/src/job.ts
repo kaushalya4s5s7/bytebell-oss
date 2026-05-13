@@ -16,6 +16,7 @@ export interface GithubIndexPayload {
   branch?: string;
   commitHash?: string;
   gitToken?: string;
+  orgId?: string;
 }
 
 export interface GithubPullPayload {
@@ -32,6 +33,7 @@ export interface GithubPullPayload {
 export interface LocalIngestPayload {
   knowledgeId: string;
   rootDir: string;
+  orgId?: string;
 }
 
 export interface JobMessage<P> {

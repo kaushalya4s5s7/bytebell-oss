@@ -22,3 +22,8 @@ re-validates because:
 - Failed validation throws `IngestError(knowledgeId, reason)` so the BullMQ
   worker promotes it into a terminal `JobResult.FAILED` via the existing
   error path.
+- Optional fields are passed through only when present and non-empty. In
+  particular, `orgId` is preserved when the payload carries it (downstream
+  enterprise builds set it per-job); when absent, the pipeline falls back
+  to `Config.OrgId` from `~/.bytebell/config.json` (locked to `"local"` in
+  OSS — see `@bb/config/src/context.md`).
