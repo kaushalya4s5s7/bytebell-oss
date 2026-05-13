@@ -15,9 +15,14 @@ Single home for shared types and enums that cross package boundaries:
   `@bb/logger`, `@bb/mongo` — refer to it without wanting an implementation
   dependency on `@bb/config`'s schema/loader/writer.
 - `JobType`, `JobPriority`, `JobMessage<P>`, `GithubIndexPayload`,
-  `GithubPullPayload`, `PayloadFor<T>` — the queue/job vocabulary shared
-  between `@bb/queue` (publisher) and future `@bb/ingest-*` packages
-  (worker handlers).
+  `GithubPullPayload`, `LocalIngestPayload`, `PayloadFor<T>`,
+  `PayloadLlmOverrides` — the queue/job vocabulary shared between
+  `@bb/queue` (publisher) and `@bb/ingest-*` packages (worker handlers).
+  `PayloadLlmOverrides` is the optional `{ llmApiKey?, llmProvider?,
+llmModel? }` mixin that lets downstream consumers carry per-job LLM
+  credentials through the payload (the extension point used by
+  the enterprise wrapper to inject per-org credentials at the enqueue
+  boundary). Mixed into both GitHub payloads.
 - `KnowledgeState` — the processing-status lifecycle enum (`CREATED →
 QUEUED → INGESTED → PROCESSING → PROCESSED ↘ FAILED`) referenced by
   `@bb/queue` (writes `QUEUED`), `@bb/mongo` (`setKnowledgeState`), and
@@ -32,10 +37,12 @@ Future inhabitants (added on need basis): full `Knowledge`, `Raw`,
 ```ts
 enum Config { ... }
 
-enum JobType     { GithubIndex, GithubPull }
+enum JobType     { GithubIndex, GithubPull, LocalIngest }
 enum JobPriority { Low, Normal, High }
-interface GithubIndexPayload { knowledgeId, repoUrl, branch?, commitHash?, gitToken? }
-interface GithubPullPayload  { knowledgeId, targetCommitHash?, gitToken? }
+interface PayloadLlmOverrides { llmApiKey?, llmProvider?: "openrouter" | "ollama", llmModel? }
+interface GithubIndexPayload extends PayloadLlmOverrides { knowledgeId, repoUrl, branch?, commitHash?, gitToken?, orgId? }
+interface GithubPullPayload  extends PayloadLlmOverrides { knowledgeId, targetCommitHash?, gitToken? }
+interface LocalIngestPayload { knowledgeId, rootDir, orgId? }
 interface JobMessage<P>      { id, type, priority, knowledgeId, attempt, createdAt, payload }
 type      PayloadFor<T extends JobType>
 
