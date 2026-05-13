@@ -41,6 +41,18 @@ export async function setKnowledgeCommit(knowledgeId: string, commitHash: string
   }
 }
 
+/**
+ * Updates the branch name of a GitHub knowledge entry.
+ */
+export async function setKnowledgeBranch(knowledgeId: string, branch: string): Promise<void> {
+  const result = await _getDb()
+    .collection(Collections.Knowledge)
+    .updateOne({ knowledgeId }, { $set: { "source.branch": branch, updatedAt: new Date() } });
+  if (result.matchedCount === 0) {
+    throw new KnowledgeNotFoundError(knowledgeId);
+  }
+}
+
 export async function updateKnowledgeProgress(
   knowledgeId: string,
   processedFiles: number,

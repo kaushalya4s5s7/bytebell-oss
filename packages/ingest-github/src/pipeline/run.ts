@@ -1,7 +1,7 @@
 import { Config, KnowledgeState, type GithubIndexPayload, type LocalIngestPayload } from "@bb/types";
 import { getConfigValue } from "@bb/config";
-import { recordProcessingStats, setKnowledgeCommit, setKnowledgeState } from "@bb/mongo";
-import { setKnowledgeStateInGraph } from "@bb/neo4j";
+import { recordProcessingStats, setKnowledgeCommit, setKnowledgeState, setKnowledgeBranch } from "@bb/mongo";
+import { setKnowledgeStateInGraph, setKnowledgeBranchInGraph } from "@bb/neo4j";
 import { estimateCostFromBreakdown } from "@bb/llm";
 import { IngestError } from "@bb/errors";
 import { logger } from "@bb/logger";
@@ -58,7 +58,9 @@ async function runGithub(
   await transitionState(knowledgeId, KnowledgeState.Processing);
   try {
     throwIfCancelled(knowledgeId);
-    const branch = resolveBranch(knowledgeId, payload);
+    const branch = await resolveBranch(knowledgeId, payload, payload.gitToken);
+    await setKnowledgeBranch(knowledgeId, branch);
+    await setKnowledgeBranchInGraph(knowledgeId, branch).catch(() => undefined);
 
     let source: SourceReader;
     let archiveSink: ArchiveSink | undefined;
