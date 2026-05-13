@@ -14,13 +14,20 @@ Domain (composes infra: `@bb/config`, `@bb/llm`, `@bb/mongo`, `@bb/neo4j`,
 - **[index.ts](index.ts)** — public surface. `registerGithubWorkers`,
   `registerLocalIngestWorker`, `createFlatFolderStrategy`,
   `createLlmFileAnalyzer`, `createDiskSourceReader`, the
-  `SourceReader` / `ArchiveSink` / `SourceFactory` port types, plus
-  `parseGithubRepo` / `fetchLatestCommitHash` (kept for the pull plan).
-  `registerGithubWorkers` accepts one optional `sourceFactory` injection
-  parameter so downstream consumers can replace the default disk-based
-  clone-and-read; the open-source binary always leaves it undefined. for the
-  seam. `GithubPull` is registered but the handler throws
-  `IngestError("…being migrated…")` — the HTTP route mirrors this at 503.
+  `SourceReader` / `ScanEntry` / `ScannedFile` / `OversizedFile` /
+  `ScanDeps` / `ArchiveSink` / `ArchiveSinkInput` / `SourceFactory` /
+  `SourceFactoryInput` / `SourceFactoryResult` / `PullFactory` /
+  `PullFactoryInput` / `PullFactoryResult` / `DiffResult` /
+  `RenamedFile` / `FileAnalyzer` / `AnalyzedFileResult` port types, the
+  `IngestStrategy` / `StrategyInput` / `StrategyResult` /
+  `StrategyContext` types, and `CondensedFileAnalysis`. Plus
+  `parseGithubRepo` / `fetchLatestCommitHash` / `fetchRecentCommits`
+  (used by the pull route). `registerGithubWorkers` accepts optional
+  `sourceFactory` (index) and `pullFactory` (pull) injections through
+  `RegisterGithubWorkersDeps`; the open-source binary leaves both
+  undefined. It registers both `JobType.GithubIndex` (full re-index, via
+  `runner.run` + optional `sourceFactory`) and `JobType.GithubPull`
+  (incremental diff-and-apply via `runPull` + optional `pullFactory`).
 - **[githubApi.ts](githubApi.ts)** — `parseGithubRepo(repoUrl)` and
   `fetchLatestCommitHash(owner, repo, branch, gitToken?)`. **Pull-only
   utility**; revisit in the pull plan. Kept in place rather than deleted so
@@ -75,10 +82,18 @@ Tier flow is strict: `types/` is the leaf; `pipeline/`, `adapters/`,
 ## Invariants enforced here
 
 - **One active strategy, factory-wired.** `createFlatFolderStrategy(deps)`
-  builds the strategy; `createPipelineRunner({ strategy })` wraps it; the
-  worker handlers are `(msg) => runner.run({ job, payload })`. Adding a
-  strategy means a new factory and a new wiring line — never editing the
-  worker. The archived `basic-file-analysis/` is `.archived` (not compiled).
+  builds the strategy; `createPipelineRunner({ strategy, sourceFactory? })`
+  wraps it; the worker handlers are `(msg) => runner.run({ job, payload })`.
+  Adding a strategy means a new factory and a new wiring line — never
+  editing the worker. The archived `basic-file-analysis/` is `.archived`
+  (not compiled).
+- **Per-job LLM credentials flow payload → context → call site.** The
+  runner (`pipeline/run.ts` for index, `pipeline/pull.ts` for pull) reads
+  `{llmApiKey, llmProvider, llmModel}` from the payload, packs them into
+  an `AskLlmOptions` bag stored on `StrategyContext.llmCallContext`, and
+  every LLM-touching phase passes that bag into `askJsonLLM` /
+  `askYesNoLLM`. OSS standalone leaves these unset and falls back to
+  `Config.OpenrouterApiKey` + `Config.LlmProvider`.
 - **State transitions are explicit and dual-written.** `pipeline/run.ts`
   transitions Mongo state to `PROCESSING` before any work, `PROCESSED` on
   success, `FAILED` best-effort on uncaught errors. Each transition mirrors
