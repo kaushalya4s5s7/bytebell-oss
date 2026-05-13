@@ -241,7 +241,7 @@ export function writeField<K extends Config>(cfg: BytebellConfig, key: K, value:
     case Config.BigFileLineThreshold:
       return { ...cfg, "big.file.line.threshold": value as number };
     case Config.OrgId:
-      return { ...cfg, org_id: value as string };
+      throw new Error("org_id is fixed to 'local' in OSS builds and cannot be set");
     case Config.SkipDecisionEnabled:
       return { ...cfg, "skip.decision.enabled": value as boolean };
     case Config.SkipDecisionMaxCharsForLlm:
