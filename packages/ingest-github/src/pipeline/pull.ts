@@ -2,7 +2,7 @@ import { Config, KnowledgeState, type GithubPullPayload, type JobMessage } from 
 import { getConfigValue } from "@bb/config";
 import { getKnowledge, recordProcessingStats, setKnowledgeCommit, setKnowledgeState } from "@bb/mongo";
 import { setKnowledgeStateInGraph, snapshotFilesToVersion, type NodeScope } from "@bb/neo4j";
-import { estimateCostFromBreakdown } from "@bb/llm";
+import { estimateCostFromBreakdown, type AskLlmOptions } from "@bb/llm";
 import { IngestError, KnowledgeNotFoundError } from "@bb/errors";
 import { logger } from "@bb/logger";
 import { ensureMetaDirs, metaPathsFor, repoCloneDir, ensureReposRoot } from "./paths.ts";
@@ -32,6 +32,24 @@ function resolveOrgId(payload: { orgId?: string }): string {
     return payload.orgId;
   }
   return getConfigValue(Config.OrgId);
+}
+
+function llmCallContextFromPayload(payload: {
+  llmApiKey?: string;
+  llmProvider?: "openrouter" | "ollama";
+  llmModel?: string;
+}): AskLlmOptions | undefined {
+  const ctx: AskLlmOptions = {};
+  if (payload.llmApiKey !== undefined && payload.llmApiKey.length > 0) {
+    ctx.apiKey = payload.llmApiKey;
+  }
+  if (payload.llmProvider !== undefined) {
+    ctx.provider = payload.llmProvider;
+  }
+  if (payload.llmModel !== undefined && payload.llmModel.length > 0) {
+    ctx.model = payload.llmModel;
+  }
+  return Object.keys(ctx).length > 0 ? ctx : undefined;
 }
 
 export async function runPull(msg: JobMessage<GithubPullPayload>): Promise<void> {
@@ -124,39 +142,61 @@ export async function runPull(msg: JobMessage<GithubPullPayload>): Promise<void>
       buildUserPrompt: buildFileAnalysisUserPrompt,
     });
 
+    const llmCallContext = llmCallContextFromPayload(msg.payload);
+
     logger.info(`pull: phase per-file dispatcher for ${knowledgeId} starting`);
     throwIfCancelled(knowledgeId);
-    await analyseChangedFiles({
+    const analyseChangedInput: Parameters<typeof analyseChangedFiles>[0] = {
       knowledgeId,
       repoDir,
       metaPaths,
       analyzer: fileAnalyzer,
       diff,
-    });
+    };
+    if (llmCallContext !== undefined) {
+      analyseChangedInput.llmCallContext = llmCallContext;
+    }
+    await analyseChangedFiles(analyseChangedInput);
 
     const source = createDiskSourceReader({ repoDir, commitHash: targetCommit });
 
     logger.info(`pull: phase process big files starting`);
     throwIfCancelled(knowledgeId);
-    await processBigFilesQueue({ knowledgeId, source, metaPaths });
+    const processBigFilesInput: Parameters<typeof processBigFilesQueue>[0] = { knowledgeId, source, metaPaths };
+    if (llmCallContext !== undefined) {
+      processBigFilesInput.llmCallContext = llmCallContext;
+    }
+    await processBigFilesQueue(processBigFilesInput);
 
     logger.info(`pull: phase backfill fields starting`);
     throwIfCancelled(knowledgeId);
-    await backfillMissingFields(metaPaths);
+    await backfillMissingFields(metaPaths, llmCallContext);
 
     logger.info(`pull: phase backfill big-files starting`);
     throwIfCancelled(knowledgeId);
-    await backfillBigFiles({ knowledgeId, source, metaPaths });
+    const backfillBigFilesInput: Parameters<typeof backfillBigFiles>[0] = { knowledgeId, source, metaPaths };
+    if (llmCallContext !== undefined) {
+      backfillBigFilesInput.llmCallContext = llmCallContext;
+    }
+    await backfillBigFiles(backfillBigFilesInput);
 
     logger.info(`pull: phase selective folder summary (${affectedFolders.size} folders) starting`);
     throwIfCancelled(knowledgeId);
-    await runSelectiveFolderSummary({ knowledgeId, metaPaths, affectedFolders });
+    const selectiveInput: Parameters<typeof runSelectiveFolderSummary>[0] = {
+      knowledgeId,
+      metaPaths,
+      affectedFolders,
+    };
+    if (llmCallContext !== undefined) {
+      selectiveInput.llmCallContext = llmCallContext;
+    }
+    await runSelectiveFolderSummary(selectiveInput);
 
     logger.info(`pull: phase repo summary starting`);
     throwIfCancelled(knowledgeId);
     const orgId = resolveOrgId({ ...(knowledge.source.kind === "github" ? {} : {}) });
     const scope: NodeScope = { orgId, knowledgeId, repoId: knowledgeId };
-    const repoSummary = await summariseRepo(knowledgeId, metaPaths);
+    const repoSummary = await summariseRepo(knowledgeId, metaPaths, llmCallContext);
     if (repoSummary !== null) {
       await persistRepoSummary(metaPaths, makeRepoSummaryEnvelope(knowledgeId, orgId, repoSummary));
     }

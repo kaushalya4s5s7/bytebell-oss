@@ -66,3 +66,14 @@ sub-phase boundary.
   after `saveCondensed`; failures inside the sink are logged WARN and do
   not interrupt the analyse loop. The open-source binary never wires a
   sink — `archiveSink` is undefined and the call is skipped entirely.
+- **Per-job LLM credentials thread through every phase.** The orchestrator
+  reads `context.llmCallContext` (an optional `AskLlmOptions` built by
+  the runner from `GithubIndexPayload.{llmApiKey, llmProvider, llmModel}`)
+  and forwards it into every phase that issues LLM calls: phase 1 via
+  `classifyAndAnalyseSmall`'s `llmCallContext`, phase 2 via
+  `processBigFilesQueue`, phase 3 via `backfillMissingFields`, phase 4 via
+  `backfillBigFiles`, phase 5 via `runFolderSummaryPhase`, phase 6 via
+  `summariseRepo`. The phases pass the same option object through to
+  `askJsonLLM` so per-org overrides reach `@bb/llm` unchanged. OSS
+  standalone leaves `llmCallContext` undefined and falls back to
+  `Config.OpenrouterApiKey` + `Config.LlmProvider`.

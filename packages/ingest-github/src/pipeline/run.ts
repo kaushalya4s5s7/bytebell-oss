@@ -2,7 +2,7 @@ import { Config, KnowledgeState, type GithubIndexPayload, type LocalIngestPayloa
 import { getConfigValue } from "@bb/config";
 import { recordProcessingStats, setKnowledgeCommit, setKnowledgeState } from "@bb/mongo";
 import { setKnowledgeStateInGraph } from "@bb/neo4j";
-import { estimateCostFromBreakdown } from "@bb/llm";
+import { estimateCostFromBreakdown, type AskLlmOptions } from "@bb/llm";
 import { IngestError } from "@bb/errors";
 import { logger } from "@bb/logger";
 import type { IngestRunnerDeps, IngestRunnerInput } from "src/types/ingest-runner.ts";
@@ -19,6 +19,24 @@ function resolveOrgId(payload: { orgId?: string }): string {
     return payload.orgId;
   }
   return getConfigValue(Config.OrgId);
+}
+
+function llmCallContextFromPayload(payload: {
+  llmApiKey?: string;
+  llmProvider?: "openrouter" | "ollama";
+  llmModel?: string;
+}): AskLlmOptions | undefined {
+  const ctx: AskLlmOptions = {};
+  if (payload.llmApiKey !== undefined && payload.llmApiKey.length > 0) {
+    ctx.apiKey = payload.llmApiKey;
+  }
+  if (payload.llmProvider !== undefined) {
+    ctx.provider = payload.llmProvider;
+  }
+  if (payload.llmModel !== undefined && payload.llmModel.length > 0) {
+    ctx.model = payload.llmModel;
+  }
+  return Object.keys(ctx).length > 0 ? ctx : undefined;
 }
 
 export interface CreatePipelineRunnerDeps {
@@ -92,12 +110,21 @@ async function runGithub(
     const metaPaths = metaPathsFor(knowledgeId);
     await ensureMetaDirs(metaPaths);
 
+    const baseContext: Parameters<typeof strategy.execute>[0]["context"] = {
+      knowledgeId,
+      orgId: resolveOrgId(payload),
+      repoId: knowledgeId,
+    };
+    const llmCallContext = llmCallContextFromPayload(payload);
+    if (llmCallContext !== undefined) {
+      baseContext.llmCallContext = llmCallContext;
+    }
     const strategyInput: Parameters<typeof strategy.execute>[0] = {
       payload,
       branch,
       source,
       metaPaths,
-      context: { knowledgeId, orgId: resolveOrgId(payload), repoId: knowledgeId },
+      context: baseContext,
     };
     if (archiveSink !== undefined) {
       strategyInput.archiveSink = archiveSink;

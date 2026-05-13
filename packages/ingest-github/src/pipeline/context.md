@@ -38,8 +38,11 @@ true` (default). Consumed by `scan.ts` via the optional `skipDecider`
   byte size exceeds `Config.AbsoluteFileSizeCap` (skipped before read) or
   when its line count exceeds `Config.BigFileLineThreshold` (default 1200;
   enters the big-file phase). Both thresholds are config-driven — no
-  magic numbers in this file. `readScannedFile` re-reads a file by
-  absolute path for the big-file phase which streams content lazily.
+  magic numbers in this file. `deps.llmCallContext` (when present) is
+  forwarded into every `SkipDeciderInput` so the LLM branch of the
+  unknown-extension gate uses per-job credentials. `readScannedFile`
+  re-reads a file by absolute path for the big-file phase which streams
+  content lazily.
 - `run.ts` — `createPipelineRunner({ reposRootDir, strategy, sourceFactory? })`
   builds an `IngestRunnerDeps`. GitHub payloads run: branch resolve,
   source-reader construction, strategy execute, commit persistence. Local
@@ -52,9 +55,18 @@ true` (default). Consumed by `scan.ts` via the optional `skipDecider`
   `archiveSink` which the strategy then threads through to its
   analyse phase. `resolveOrgId(payload)` returns
   `payload.orgId ?? getConfigValue(Config.OrgId)` — the only place orgId
-  is resolved. State transitions (`CREATED → QUEUED → INGESTED → …`) are
-  persisted to Mongo + Neo4j via `transitionState`, and
-  `CancellationError` is re-thrown without flipping to FAILED.
+  is resolved. `llmCallContextFromPayload(payload)` extracts the optional
+  `{ llmApiKey, llmProvider, llmModel }` overrides from the payload and
+  packs them into an `AskLlmOptions` bag stored on `StrategyContext.
+llmCallContext`, which every LLM call site downstream consumes. State
+  transitions (`CREATED → QUEUED → INGESTED → …`) are persisted to Mongo
+  - Neo4j via `transitionState`, and `CancellationError` is re-thrown
+    without flipping to FAILED.
+- `pull.ts` — `runPull(msg)` orchestrates the pull job. Mirrors the same
+  payload-to-`llmCallContext` extraction as `run.ts` and threads the
+  resulting `AskLlmOptions` bag into every phase invocation
+  (`analyseChangedFiles`, `processBigFilesQueue`, `backfillMissingFields`,
+  `backfillBigFiles`, `runSelectiveFolderSummary`, `summariseRepo`).
 - `branch.ts` — `resolveBranch(knowledgeId, payload)`. Defaults to `main` when
   the payload omits it; rejects branch names that don't match `^[\w./-]+$`
   with `IngestError` (defence against shell-injection into git args).

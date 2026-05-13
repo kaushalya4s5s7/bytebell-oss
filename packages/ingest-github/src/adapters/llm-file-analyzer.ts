@@ -1,4 +1,4 @@
-import { askJsonLLM } from "@bb/llm";
+import { askJsonLLM, type AskLlmOptions } from "@bb/llm";
 import { logger } from "@bb/logger";
 import type { FileAnalysis, FileAnalysisSection } from "@bb/mongo";
 import { FALLBACK_LANGUAGE, emptyFileAnalysis } from "src/types/file-analysis.ts";
@@ -33,12 +33,16 @@ interface RawAnalysisJson {
 
 export function createLlmFileAnalyzer(deps: LlmFileAnalyzerDeps): FileAnalyzer {
   return {
-    async analyze(input: { relativePath: string; content: string }): Promise<AnalyzedFileResult> {
+    async analyze(input: {
+      relativePath: string;
+      content: string;
+      llmCallContext?: AskLlmOptions;
+    }): Promise<AnalyzedFileResult> {
       const systemPrompt = deps.buildSystemPrompt();
       const userPrompt = deps.buildUserPrompt(input);
       let raw: RawAnalysisJson | null = null;
       try {
-        const response = await askJsonLLM<RawAnalysisJson>(systemPrompt, userPrompt);
+        const response = await askJsonLLM<RawAnalysisJson>(systemPrompt, userPrompt, input.llmCallContext ?? {});
         raw = response.result;
         if (raw === null) {
           logger.warn(`llm-file-analyzer: ${input.relativePath} returned unparseable JSON`);
