@@ -20,8 +20,16 @@ Domain (sub-folder of `@bb/ingest-github`).
   may later relax depth; ingestion does not need full history. Wraps git
   failures in `GitCloneError` (from `@bb/errors`).
 - `filters.ts` — `SKIP_DIRS`, `SKIP_FILES`, `BINARY_EXTENSIONS`, `looksBinary`,
-  `passesPathFilters`. Pure data; no I/O.
-- `scan.ts` — async generator `scanRepository(rootDir)` yielding `ScanEntry`
+  `passesPathFilters`. Now sourced from `skip-decisions/seed.ts`
+  (`SEED_DIRECTORIES`/`SEED_FILENAMES`/`SEED_EXTENSIONS`) plus a small
+  legacy literal block so the public scanner still rejects `.DS_Store`,
+  lockfiles, and binary assets without requiring the seed JSON. Pure
+  data; no I/O.
+- `skip-decisions/` — LLM-backed unknown-extension gate. See
+  `skip-decisions/context.md`. Active when `Config.SkipDecisionEnabled =
+true` (default). Consumed by `scan.ts` via the optional `skipDecider`
+  dep; built by `classifyAndAnalyseSmall` if not injected.
+- `scan.ts` — async generator `scanRepository(rootDir, deps?)` yielding `ScanEntry`
   (`kind: "file"` or `kind: "oversized"`). A file is `oversized` when its
   byte size exceeds `Config.AbsoluteFileSizeCap` (skipped before read) or
   when its line count exceeds `Config.BigFileLineThreshold` (default 1200;
@@ -62,9 +70,12 @@ Domain (sub-folder of `@bb/ingest-github`).
 ## Invariants
 
 - Every file is ≤ 300 lines.
-- No LLM prompt construction, no graph traversal, no per-file Mongo
-  writes happen here — those live under `strategies/`. `run.ts` only
-  performs end-of-pipeline state transitions and stats persistence.
+- No graph traversal, no per-file Mongo writes happen here — those live
+  under `strategies/`. `run.ts` only performs end-of-pipeline state
+  transitions and stats persistence. **Exception**: `skip-decisions/`
+  uses `@bb/llm` for the unknown-extension YES/NO gate; this is the
+  one LLM-touching path in `pipeline/` and is gated by
+  `Config.SkipDecisionEnabled`.
 - `scanRepository` never blocks the event loop on a large repo: it streams via
   `opendir` + per-file `readFile`; it never buffers the full tree.
 - Tunable scan thresholds (`Config.AbsoluteFileSizeCap`,

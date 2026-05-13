@@ -2,23 +2,47 @@ import { opendir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { Config } from "@bb/types";
 import { getConfigValue } from "@bb/config";
+import { logger } from "@bb/logger";
 import { SKIP_DIRS, looksBinary, passesPathFilters } from "./filters.ts";
-import type { ScanEntry } from "src/types/pipeline.ts";
+import type { ScanEntry, SkipDecider } from "src/types/pipeline.ts";
 
 interface ScanLimits {
   absoluteCap: number;
   bigFileLineThreshold: number;
 }
 
-export async function* scanRepository(rootDir: string): AsyncGenerator<ScanEntry> {
+export interface ScanRepositoryDeps {
+  skipDecider?: SkipDecider;
+}
+
+export async function* scanRepository(rootDir: string, deps: ScanRepositoryDeps = {}): AsyncGenerator<ScanEntry> {
   const limits: ScanLimits = {
     absoluteCap: getConfigValue(Config.AbsoluteFileSizeCap),
     bigFileLineThreshold: getConfigValue(Config.BigFileLineThreshold),
   };
-  yield* walk(rootDir, rootDir, limits);
+  const counts = { acceptStatic: 0, acceptLlm: 0, rejectStatic: 0, rejectLlm: 0, oversized: 0, binary: 0 };
+  yield* walk(rootDir, rootDir, limits, deps, counts);
+  logger.info(
+    `scan: acceptStatic=${counts.acceptStatic} acceptLlm=${counts.acceptLlm} rejectStatic=${counts.rejectStatic} rejectLlm=${counts.rejectLlm} oversized=${counts.oversized} binary=${counts.binary}`,
+  );
 }
 
-async function* walk(rootDir: string, currentDir: string, limits: ScanLimits): AsyncGenerator<ScanEntry> {
+interface ScanCounts {
+  acceptStatic: number;
+  acceptLlm: number;
+  rejectStatic: number;
+  rejectLlm: number;
+  oversized: number;
+  binary: number;
+}
+
+async function* walk(
+  rootDir: string,
+  currentDir: string,
+  limits: ScanLimits,
+  deps: ScanRepositoryDeps,
+  counts: ScanCounts,
+): AsyncGenerator<ScanEntry> {
   const dir = await opendir(currentDir);
   for await (const entry of dir) {
     const abs = path.join(currentDir, entry.name);
@@ -26,29 +50,52 @@ async function* walk(rootDir: string, currentDir: string, limits: ScanLimits): A
       if (SKIP_DIRS.has(entry.name)) {
         continue;
       }
-      yield* walk(rootDir, abs, limits);
+      yield* walk(rootDir, abs, limits, deps, counts);
       continue;
     }
     if (!entry.isFile()) {
       continue;
     }
     if (!passesPathFilters(entry.name, path.extname(entry.name))) {
+      counts.rejectStatic += 1;
       continue;
     }
     const sizeBytes = (await stat(abs)).size;
     const relativePath = path.relative(rootDir, abs);
+    const ext = path.extname(entry.name).toLowerCase();
     if (sizeBytes > limits.absoluteCap) {
+      counts.oversized += 1;
       yield { kind: "oversized", relativePath, absolutePath: abs, sizeBytes };
       continue;
     }
     const buf = await readFile(abs);
     if (looksBinary(buf)) {
+      counts.binary += 1;
       continue;
     }
     const content = buf.toString("utf8");
     if (countLines(content) > limits.bigFileLineThreshold) {
+      counts.oversized += 1;
       yield { kind: "oversized", relativePath, absolutePath: abs, sizeBytes };
       continue;
+    }
+    if (deps.skipDecider !== undefined) {
+      const decision = await deps.skipDecider.decide({ relativePath, absolutePath: abs, ext });
+      if (decision === "reject-static") {
+        counts.rejectStatic += 1;
+        continue;
+      }
+      if (decision === "reject-llm") {
+        counts.rejectLlm += 1;
+        continue;
+      }
+      if (decision === "accept-llm") {
+        counts.acceptLlm += 1;
+      } else {
+        counts.acceptStatic += 1;
+      }
+    } else {
+      counts.acceptStatic += 1;
     }
     yield {
       kind: "file",

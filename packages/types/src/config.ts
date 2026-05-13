@@ -25,4 +25,7 @@ export enum Config {
   SmallFileDedupThreshold = "small.file.dedup.threshold",
   BigFileLineThreshold = "big.file.line.threshold",
   OrgId = "org_id",
+  SkipDecisionEnabled = "skip.decision.enabled",
+  SkipDecisionMaxCharsForLlm = "skip.decision.max.chars.for.llm",
+  SkipDecisionCachePath = "skip.decision.cache.path",
 }

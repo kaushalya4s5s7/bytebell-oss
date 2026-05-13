@@ -1,13 +1,15 @@
+import path from "node:path";
 import { tokenLen } from "@bb/llm";
 import { logger } from "@bb/logger";
 import { Config } from "@bb/types";
 import { getConfigValue } from "@bb/config";
-import type { FileAnalyzer } from "src/types/pipeline.ts";
+import type { FileAnalyzer, SkipDecider } from "src/types/pipeline.ts";
 import type { MetaPaths } from "src/types/meta-paths.ts";
 import type { BigFileEntry } from "src/types/big-file.ts";
 import { scanRepository } from "src/pipeline/scan.ts";
 import { withConcurrency } from "src/pipeline/concurrency.ts";
 import { throwIfCancelled, CancellationError } from "src/pipeline/cancellation.ts";
+import { makeSkipDecider } from "src/pipeline/skip-decisions/index.ts";
 import { analyseScannedFile, buildOversizedStub } from "src/strategies/flat-folder/analyse-file.ts";
 import { saveCondensed } from "src/strategies/flat-folder/big-file/storage.ts";
 import { writeBigFiles } from "src/strategies/flat-folder/big-file/detector.ts";
@@ -17,6 +19,7 @@ export interface ClassifyPhaseInput {
   repoDir: string;
   metaPaths: MetaPaths;
   analyzer: FileAnalyzer;
+  skipDecider?: SkipDecider;
 }
 
 export interface ClassifyPhaseResult {
@@ -35,9 +38,11 @@ export async function classifyAndAnalyseSmall(input: ClassifyPhaseInput): Promis
   let oversizedStubs = 0;
   let failed = 0;
 
+  const skipDecider = input.skipDecider ?? makeSkipDecider({ repositoryName: path.basename(input.repoDir) });
+
   const pending: Promise<void>[] = [];
 
-  for await (const entry of scanRepository(input.repoDir)) {
+  for await (const entry of scanRepository(input.repoDir, { skipDecider })) {
     throwIfCancelled(input.knowledgeId);
 
     if (entry.kind === "oversized") {

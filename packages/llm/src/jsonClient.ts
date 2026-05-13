@@ -39,6 +39,32 @@ export function tryParseJson<T>(raw: string): T | null {
   }
 }
 
+export interface AskYesNoLlmResult {
+  decision: boolean | null;
+  usage: AskLlmUsage;
+  raw: string;
+}
+
+export async function askYesNoLLM(
+  systemPrompt: string,
+  userPrompt: string,
+  opts: AskLlmOptions = {},
+): Promise<AskYesNoLlmResult> {
+  try {
+    const { content, usage } = await askLLM(userPrompt, { ...opts, systemPrompt });
+    const normalized = content.toUpperCase().trim();
+    if (normalized.startsWith("YES")) {
+      return { decision: true, usage, raw: content };
+    }
+    if (normalized.startsWith("NO")) {
+      return { decision: false, usage, raw: content };
+    }
+    return { decision: null, usage, raw: content };
+  } catch {
+    return { decision: null, usage: { model: "", inputTokens: 0, outputTokens: 0 }, raw: "" };
+  }
+}
+
 export async function askJsonLLM<T>(
   systemPrompt: string,
   userPrompt: string,

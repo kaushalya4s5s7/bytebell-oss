@@ -1,4 +1,6 @@
-export const SKIP_DIRS = new Set([
+import { SEED_DIRECTORIES, SEED_EXTENSIONS, SEED_FILENAMES } from "./skip-decisions/seed.ts";
+
+const LEGACY_SKIP_DIRS = [
   ".git",
   "node_modules",
   "dist",
@@ -8,9 +10,9 @@ export const SKIP_DIRS = new Set([
   ".cache",
   "coverage",
   ".bytebell",
-]);
+];
 
-export const SKIP_FILES = new Set([
+const LEGACY_SKIP_FILES = [
   ".DS_Store",
   "package-lock.json",
   "yarn.lock",
@@ -18,9 +20,9 @@ export const SKIP_FILES = new Set([
   "Cargo.lock",
   "Pipfile.lock",
   "poetry.lock",
-]);
+];
 
-export const BINARY_EXTENSIONS = new Set([
+const LEGACY_BINARY_EXTENSIONS = [
   ".png",
   ".jpg",
   ".jpeg",
@@ -61,7 +63,11 @@ export const BINARY_EXTENSIONS = new Set([
   ".dylib",
   ".wasm",
   ".bin",
-]);
+];
+
+export const SKIP_DIRS: ReadonlySet<string> = new Set([...SEED_DIRECTORIES, ...LEGACY_SKIP_DIRS]);
+export const SKIP_FILES: ReadonlySet<string> = new Set([...SEED_FILENAMES, ...LEGACY_SKIP_FILES]);
+export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([...SEED_EXTENSIONS, ...LEGACY_BINARY_EXTENSIONS]);
 
 export function looksBinary(buf: Buffer): boolean {
   const sample = buf.subarray(0, Math.min(buf.length, 4096));

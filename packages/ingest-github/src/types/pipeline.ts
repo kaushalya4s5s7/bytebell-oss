@@ -37,3 +37,15 @@ export interface PipelineSummary {
 export interface PipelineDeps {
   reposRootDir: string;
 }
+
+export type SkipDecision = "accept" | "reject-static" | "reject-llm" | "accept-llm";
+
+export interface SkipDeciderInput {
+  relativePath: string;
+  absolutePath: string;
+  ext: string;
+}
+
+export interface SkipDecider {
+  decide(input: SkipDeciderInput): Promise<SkipDecision>;
+}

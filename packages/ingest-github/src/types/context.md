@@ -12,7 +12,9 @@ Domain (sub-folder of `@bb/ingest-github`).
 - `strategy.ts` — `IngestStrategy`, `StrategyInput`, `StrategyResult`,
   `StrategyContext`. The strategy port the orchestrator dispatches to.
 - `pipeline.ts` — `ScannedFile`, `OversizedFile`, `ScanEntry`, `FileAnalyzer`
-  port, `AnalyzedFileResult`, `PipelineDeps`, `PipelineSummary`.
+  port, `AnalyzedFileResult`, `PipelineDeps`, `PipelineSummary`,
+  `SkipDecider` / `SkipDeciderInput` / `SkipDecision` (the unknown-extension
+  gate port; implementation lives under `pipeline/skip-decisions/`).
 - `meta-paths.ts` — `MetaPaths` shape (`~/.bytebell/repos/.meta/<knowledgeId>/...`).
 - `file-analysis.ts` — `FALLBACK_LANGUAGE = "unknown"` and `emptyFileAnalysis()`
   factory. Both consumed by the LLM adapter and the big-file condenser.
