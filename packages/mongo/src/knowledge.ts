@@ -1,4 +1,4 @@
-import { KnowledgeState, type KnowledgeDoc } from "@bb/types";
+import type { KnowledgeDoc, KnowledgeState } from "@bb/types";
 import { KnowledgeNotFoundError } from "@bb/errors";
 import { _getDb } from "./client.ts";
 import { Collections } from "./collections.ts";

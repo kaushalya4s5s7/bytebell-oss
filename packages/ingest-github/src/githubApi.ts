@@ -137,3 +137,85 @@ export async function fetchBranches(
   const branches = body.map((b) => b.name).filter((name): name is string => typeof name === "string");
   return { status: "ok", branches };
 }
+
+export interface CommitEntry {
+  sha: string;
+  message: string;
+  author: string;
+  timestamp: string;
+}
+
+export type FetchCommitsResult =
+  | { status: "ok"; commits: CommitEntry[] }
+  | { status: "not_found" }
+  | { status: "unauthorized" }
+  | { status: "rate_limited" }
+  | { status: "error"; message: string };
+
+/**
+ * Fetches recent commits for a repository on a specific branch.
+ */
+export async function fetchRecentCommits(
+  repoUrl: string,
+  branch: string,
+  limit = 10,
+  gitToken?: string,
+): Promise<FetchCommitsResult> {
+  const parsed = parseGithubRepo(repoUrl);
+  if (parsed === null) {
+    return { status: "error", message: `unparseable github url: ${repoUrl}` };
+  }
+
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": USER_AGENT,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  if (gitToken !== undefined && gitToken.length > 0) {
+    headers["Authorization"] = `Bearer ${gitToken}`;
+  }
+
+  const url = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/commits?per_page=${limit}&sha=${encodeURIComponent(branch)}`;
+  let response: Response;
+  try {
+    response = await fetch(url, { headers });
+  } catch (cause: unknown) {
+    const msg = cause instanceof Error ? cause.message : String(cause);
+    return { status: "error", message: `github fetch failed: ${msg}` };
+  }
+
+  if (response.status === 404) {
+    return { status: "not_found" };
+  }
+  if (response.status === 401) {
+    return { status: "unauthorized" };
+  }
+  if (response.status === 403 && response.headers.get("x-ratelimit-remaining") === "0") {
+    return { status: "rate_limited" };
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    return { status: "error", message: `github ${response.status}: ${body.slice(0, 200)}` };
+  }
+
+  const body = (await response.json()) as Array<{
+    sha?: unknown;
+    commit?: { message?: unknown; author?: { date?: unknown } };
+    author?: { login?: unknown };
+  }>;
+
+  const commits = body
+    .map((c) => {
+      const sha = typeof c.sha === "string" ? c.sha : "";
+      const message = typeof c.commit?.message === "string" ? c.commit.message : "";
+      const author = typeof c.author?.login === "string" ? c.author.login : "";
+      const timestamp = typeof c.commit?.author?.date === "string" ? c.commit.author.date : "";
+      return { sha, message, author, timestamp };
+    })
+    .filter((c): c is CommitEntry => Boolean(c.sha && c.message));
+
+  return { status: "ok", commits };
+}
+
+export { parseGithubRepo } from "./githubUrl.ts";
+export type { ParsedRepo } from "./githubUrl.ts";
