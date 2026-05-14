@@ -62,7 +62,7 @@ llmCallContext`, which every LLM call site downstream consumes. State
   transitions (`CREATED → QUEUED → INGESTED → …`) are persisted to Mongo
   - Neo4j via `transitionState`, and `CancellationError` is re-thrown
     without flipping to FAILED.
-- `pull.ts` — `runPull(msg, pullFactory?)` orchestrates the pull job.
+- `pull.ts` — `runPull(msg, pullFactory?, progressContextFactory?)` orchestrates the pull job.
   Reads `repoUrl` and `branch` directly off `knowledge.info.*` (loaded via
   `@bb/mongo.getKnowledge`). The `KnowledgeSource` discriminator (`kind`) is
   still read off `knowledge.source` along with `commitId`/`commitHashes`, but
@@ -77,6 +77,13 @@ archiveSink?}` and `runPull` skips `syncRepository` + `materialiseEndpoints`
     `processBigFilesQueue`, `backfillMissingFields`, `backfillBigFiles`,
     `runSelectiveFolderSummary`, `summariseRepo`, `storePullAnalysis`.
     Mirrors `run.ts` for `llmCallContext` extraction from payload.
+    Mirrors the index-side strategy orchestrator for progress: builds one
+    `ProgressContext` per job from the optional `progressContextFactory`
+    (default `nullProgressContextFactory`), emits `phaseChanged` at
+    `file_analysis` / `folder_analysis` / `indexing` boundaries, threads
+    the context into every phase that takes a `progressContext?` field,
+    and finishes with `completed()` on success or `failed(message)` on a
+    non-`CancellationError` throw.
 - `pull-helpers.ts` — small pure helpers extracted from `pull.ts` to keep it
   under the 300-line cap: `persistPullStats` writes the per-commit row into
   `processing_stats`, `repoNameFromUrl` parses an owner/repo display name out
