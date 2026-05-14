@@ -9,9 +9,7 @@
 
 export type ProgressPhase = "file_analysis" | "folder_analysis" | "indexing";
 
-export type ProgressTotalMode =
-  | { kind: "fixed"; total: number }
-  | { kind: "growing"; initialTotal?: number };
+export type ProgressTotalMode = { kind: "fixed"; total: number } | { kind: "growing"; initialTotal?: number };
 
 export interface ProgressReporterInput {
   readonly phase: ProgressPhase;
