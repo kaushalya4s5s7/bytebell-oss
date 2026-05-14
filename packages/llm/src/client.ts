@@ -7,11 +7,26 @@ import { callOpenRouter, resolveOpenRouterChain } from "./openrouter.ts";
 
 const DEFAULT_TIMEOUT_MS = 360_000;
 
+export type LlmProviderName = "openrouter" | "ollama";
+
 export interface AskLlmOptions {
   model?: string;
   fallbackModels?: string[];
   timeoutMs?: number;
   systemPrompt?: string;
+  /**
+   * Per-call override of the OpenRouter API key. When set, takes precedence
+   * over `Config.OpenrouterApiKey`. Used by downstream consumers (e.g. the
+   * enterprise wrapper) that resolve per-org credentials at the enqueue
+   * boundary and pass them through the job payload. Ignored by the Ollama
+   * provider (which is keyless).
+   */
+  apiKey?: string;
+  /**
+   * Per-call override of `Config.LlmProvider`. When set, routes the call to
+   * the named provider regardless of the configured default.
+   */
+  provider?: LlmProviderName;
 }
 
 export interface AskLlmUsage {
@@ -26,7 +41,7 @@ export interface AskLlmResult {
 }
 
 export async function askLLM(prompt: string, opts: AskLlmOptions = {}): Promise<AskLlmResult> {
-  const provider = getConfigValue(Config.LlmProvider);
+  const provider: LlmProviderName = opts.provider ?? (getConfigValue(Config.LlmProvider) as LlmProviderName);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const chain = provider === "ollama" ? resolveOllamaChain(opts) : resolveOpenRouterChain(opts);
 

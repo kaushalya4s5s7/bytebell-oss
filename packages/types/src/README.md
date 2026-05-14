@@ -16,13 +16,19 @@ package-level contract; this file documents how the source tree is split.
 - **[job.ts](job.ts)** — the queue vocabulary: `JobType` (today: GitHub
   index + pull, local ingest), `JobPriority`, the per-type payload
   interfaces (`GithubIndexPayload`, `GithubPullPayload`,
-  `LocalIngestPayload`), the `JobMessage<P>` envelope wrapping payloads
-  as BullMQ `job.data`, and the `PayloadFor<T>` type-level dispatcher.
-  Shared between `@bb/queue` (publisher) and future `@bb/ingest-*`
-  packages (worker handlers). Ingest payloads carry an optional
-  `orgId?: string` override; OSS callers omit it and the pipeline reads
-  `Config.OrgId` from `~/.bytebell/config.json` (locked to `"local"`
-  in OSS builds; downstream enterprise builds set `orgId` per-job).
+  `LocalIngestPayload`), the `PayloadLlmOverrides` mixin, the
+  `JobMessage<P>` envelope wrapping payloads as BullMQ `job.data`, and
+  the `PayloadFor<T>` type-level dispatcher. Shared between `@bb/queue`
+  (publisher) and `@bb/ingest-*` packages (worker handlers). Ingest
+  payloads carry an optional `orgId?: string` override; OSS callers omit
+  it and the pipeline reads `Config.OrgId` from `~/.bytebell/config.json`
+  (locked to `"local"` in OSS builds; downstream enterprise builds set
+  `orgId` per-job). Both GitHub payloads also extend `PayloadLlmOverrides`
+  which adds optional `llmApiKey?`, `llmProvider?`, `llmModel?` — the
+  extension point that lets downstream enterprise builds resolve per-org
+  LLM credentials at the enqueue boundary and pass them through the
+  payload. OSS standalone leaves the LLM fields unset and the pipeline
+  falls back to `Config.OpenrouterApiKey` + `Config.LlmProvider`.
 - **[knowledge.ts](knowledge.ts)** — the `KnowledgeState` enum modeling
   the lifecycle in [CLAUDE.md](../../../CLAUDE.md). v0 only ships the
   enum; the full `Knowledge` document interface lands when domain CRUD

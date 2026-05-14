@@ -10,7 +10,20 @@ export enum JobPriority {
   High = 2,
 }
 
-export interface GithubIndexPayload {
+/**
+ * Optional per-job LLM credential overrides. When set, take precedence over
+ * `Config.OpenrouterApiKey` and `Config.LlmProvider` for the duration of this
+ * job's processing. Used by downstream consumers (e.g. the enterprise wrapper)
+ * that resolve per-org credentials at the enqueue boundary and infuse them
+ * into the payload — OSS standalone leaves all three unset.
+ */
+export interface PayloadLlmOverrides {
+  llmApiKey?: string;
+  llmProvider?: "openrouter" | "ollama";
+  llmModel?: string;
+}
+
+export interface GithubIndexPayload extends PayloadLlmOverrides {
   knowledgeId: string;
   repoUrl: string;
   branch?: string;
@@ -19,7 +32,7 @@ export interface GithubIndexPayload {
   orgId?: string;
 }
 
-export interface GithubPullPayload {
+export interface GithubPullPayload extends PayloadLlmOverrides {
   knowledgeId: string;
   /**
    * Optional commit to re-index the knowledge to. Must be a 40-character hex SHA
