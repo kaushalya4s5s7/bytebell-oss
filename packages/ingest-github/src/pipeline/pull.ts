@@ -184,7 +184,9 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
     if (archiveSink !== undefined) {
       analyseChangedInput.archiveSink = archiveSink;
     }
-    await analyseChangedFiles(analyseChangedInput);
+    const phase1 = await analyseChangedFiles(analyseChangedInput);
+    let totalInputTokens = phase1.tokenUsage.inputTokens;
+    let totalOutputTokens = phase1.tokenUsage.outputTokens;
 
     logger.info(`pull: phase process big files starting`);
     throwIfCancelled(knowledgeId);
@@ -192,7 +194,9 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
     if (llmCallContext !== undefined) {
       processBigFilesInput.llmCallContext = llmCallContext;
     }
-    await processBigFilesQueue(processBigFilesInput);
+    const phase2 = await processBigFilesQueue(processBigFilesInput);
+    totalInputTokens += phase2.tokenUsage.inputTokens;
+    totalOutputTokens += phase2.tokenUsage.outputTokens;
 
     logger.info(`pull: phase backfill fields starting`);
     throwIfCancelled(knowledgeId);
@@ -216,13 +220,17 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
     if (llmCallContext !== undefined) {
       selectiveInput.llmCallContext = llmCallContext;
     }
-    await runSelectiveFolderSummary(selectiveInput);
+    const phase5 = await runSelectiveFolderSummary(selectiveInput);
+    totalInputTokens += phase5.tokenUsage.inputTokens;
+    totalOutputTokens += phase5.tokenUsage.outputTokens;
 
     logger.info(`pull: phase repo summary starting`);
     throwIfCancelled(knowledgeId);
     const orgId = resolveOrgId({ ...(knowledge.source.kind === "github" ? {} : {}) });
     const scope: NodeScope = { orgId, knowledgeId, repoId: knowledgeId };
-    const repoSummary = await summariseRepo(knowledgeId, metaPaths, llmCallContext);
+    const { summary: repoSummary, tokenUsage: repoUsage } = await summariseRepo(knowledgeId, metaPaths, llmCallContext);
+    totalInputTokens += repoUsage.inputTokens;
+    totalOutputTokens += repoUsage.outputTokens;
     if (repoSummary !== null) {
       await persistRepoSummary(metaPaths, makeRepoSummaryEnvelope(knowledgeId, orgId, repoSummary));
     }
@@ -238,15 +246,16 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
       affectedFolders,
     });
 
-    await persistPullStats({
+    const stats = await persistPullStats({
       knowledgeId,
       repoName: repoNameFromUrl(repoUrl),
       commitHash: targetCommit,
       filesAnalyzed: stored.filesUpserted,
       foldersSummarised: stored.foldersUpserted,
       processingTimeMs: Date.now() - startedAt,
+      tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
     });
-    await setKnowledgeCommit(knowledgeId, targetCommit);
+    await setKnowledgeCommit(knowledgeId, targetCommit, String(stats.inputTokens), String(stats.outputTokens));
     await transitionState(knowledgeId, KnowledgeState.Processed);
     logger.info(
       `pull: ${knowledgeId} ${currentCommit.slice(0, 12)} -> ${targetCommit.slice(0, 12)} done (filesUpserted=${stored.filesUpserted} filesDeleted=${stored.filesDeleted} foldersUpserted=${stored.foldersUpserted})`,

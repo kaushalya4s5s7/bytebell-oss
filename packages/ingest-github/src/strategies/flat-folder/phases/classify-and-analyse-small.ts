@@ -28,6 +28,7 @@ export interface ClassifyPhaseResult {
   bigFilesQueued: number;
   oversizedStubs: number;
   failed: number;
+  tokenUsage: { inputTokens: number; outputTokens: number };
 }
 
 export async function classifyAndAnalyseSmall(input: ClassifyPhaseInput): Promise<ClassifyPhaseResult> {
@@ -38,6 +39,8 @@ export async function classifyAndAnalyseSmall(input: ClassifyPhaseInput): Promis
   let smallFilesAnalysed = 0;
   let oversizedStubs = 0;
   let failed = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   const repositoryHint =
     input.source.localRepoDir.length > 0 ? path.basename(input.source.localRepoDir) : input.knowledgeId;
@@ -96,6 +99,10 @@ export async function classifyAndAnalyseSmall(input: ClassifyPhaseInput): Promis
             });
           }
           smallFilesAnalysed += 1;
+          if (condensed.tokenUsage) {
+            totalInputTokens += condensed.tokenUsage.inputTokens;
+            totalOutputTokens += condensed.tokenUsage.outputTokens;
+          }
         } catch (cause: unknown) {
           if (cause instanceof CancellationError) {
             throw cause;
@@ -119,6 +126,7 @@ export async function classifyAndAnalyseSmall(input: ClassifyPhaseInput): Promis
     bigFilesQueued: bigFileBuffer.filter((e) => e.reason === "context-window-exceeded").length,
     oversizedStubs,
     failed,
+    tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
   };
 }
 

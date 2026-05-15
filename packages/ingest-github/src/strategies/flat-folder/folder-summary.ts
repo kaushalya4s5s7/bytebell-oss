@@ -40,7 +40,7 @@ export async function summariseFolder(
   folderPath: string,
   files: CondensedFileAnalysis[],
   llmCallContext?: AskLlmOptions,
-): Promise<FolderSummary | null> {
+): Promise<{ summary: FolderSummary | null; tokenUsage: { inputTokens: number; outputTokens: number } }> {
   const userPrompt = folderAnalysisUserPrompt(folderPath, files);
   try {
     const response = await askJsonLLM<FolderSummaryJson>(
@@ -50,13 +50,19 @@ export async function summariseFolder(
     );
     if (response.result === null) {
       logger.warn(`summariseFolder: ${folderPath || "<root>"} returned unparseable JSON`);
-      return null;
+      return {
+        summary: null,
+        tokenUsage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens },
+      };
     }
-    return shapeFolderSummary(folderPath, response.result);
+    return {
+      summary: shapeFolderSummary(folderPath, response.result),
+      tokenUsage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens },
+    };
   } catch (cause: unknown) {
     const msg = cause instanceof Error ? cause.message : String(cause);
     logger.warn(`summariseFolder: ${folderPath || "<root>"} askJsonLLM failed: ${msg}`);
-    return null;
+    return { summary: null, tokenUsage: { inputTokens: 0, outputTokens: 0 } };
   }
 }
 
@@ -92,19 +98,23 @@ export async function runFolderSummaryPhase(
   knowledgeId: string,
   metaPaths: MetaPaths,
   llmCallContext?: AskLlmOptions,
-): Promise<{ succeeded: number; failed: number }> {
+): Promise<{ succeeded: number; failed: number; tokenUsage: { inputTokens: number; outputTokens: number } }> {
   const concurrentWorkers = getConfigValue(Config.ConcurrentWorkers);
   const limit = withConcurrency(concurrentWorkers);
   const groups = await groupByDirectFolder(metaPaths);
   let succeeded = 0;
   let failed = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
   const tasks: Promise<void>[] = [];
   for (const [folderPath, files] of groups.entries()) {
     tasks.push(
       limit(async () => {
         try {
           throwIfCancelled(knowledgeId);
-          const summary = await summariseFolder(folderPath, files, llmCallContext);
+          const { summary, tokenUsage } = await summariseFolder(folderPath, files, llmCallContext);
+          totalInputTokens += tokenUsage.inputTokens;
+          totalOutputTokens += tokenUsage.outputTokens;
           if (summary !== null) {
             await persistFolderSummary(metaPaths, summary);
             succeeded += 1;
@@ -123,7 +133,7 @@ export async function runFolderSummaryPhase(
   }
   await Promise.all(tasks);
   logger.info(`phase5 done: foldersSummarised=${succeeded} failed=${failed}`);
-  return { succeeded, failed };
+  return { succeeded, failed, tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens } };
 }
 
 function shapeFolderSummary(folderPath: string, raw: FolderSummaryJson): FolderSummary {

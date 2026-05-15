@@ -131,15 +131,16 @@ async function runGithub(
     }
     const result = await strategy.execute(strategyInput);
 
-    await persistStats({
+    const stats = await persistStats({
       knowledgeId,
       repoName: repoNameFromUrl(payload.repoUrl),
       commitHash,
       filesAnalyzed: result.filesAnalyzed,
       foldersSummarised: result.foldersSummarised,
       processingTimeMs: Date.now() - startedAt,
+      tokenUsage: result.tokenUsage,
     });
-    await setKnowledgeCommit(knowledgeId, commitHash);
+    await setKnowledgeCommit(knowledgeId, commitHash, String(stats.inputTokens), String(stats.outputTokens));
     await transitionState(knowledgeId, KnowledgeState.Processed);
 
     const totalMs = Date.now() - startedAt;
@@ -153,6 +154,7 @@ async function runGithub(
       repoSummarised: result.repoSummarised,
       graphNodesWritten: result.graphNodesWritten,
       commitHash,
+      tokenUsage: result.tokenUsage,
     };
   } catch (cause: unknown) {
     if (cause instanceof CancellationError) {
@@ -193,6 +195,7 @@ async function runLocal(strategy: IngestStrategy, payload: LocalIngestPayload): 
       filesAnalyzed: result.filesAnalyzed,
       foldersSummarised: result.foldersSummarised,
       processingTimeMs: Date.now() - startedAt,
+      tokenUsage: result.tokenUsage,
     });
     await transitionState(knowledgeId, KnowledgeState.Processed);
     return {
@@ -201,6 +204,7 @@ async function runLocal(strategy: IngestStrategy, payload: LocalIngestPayload): 
       repoSummarised: result.repoSummarised,
       graphNodesWritten: result.graphNodesWritten,
       commitHash,
+      tokenUsage: result.tokenUsage,
     };
   } catch (cause: unknown) {
     if (cause instanceof CancellationError) {
@@ -224,15 +228,21 @@ interface PersistStatsInput {
   filesAnalyzed: number;
   foldersSummarised: number;
   processingTimeMs: number;
+  tokenUsage: { inputTokens: number; outputTokens: number };
 }
 
-async function persistStats(input: PersistStatsInput): Promise<void> {
+async function persistStats(input: PersistStatsInput): Promise<{ inputTokens: number; outputTokens: number }> {
   const estimatedCost = await estimateCostFromBreakdown({});
-  await recordProcessingStats({
+  return await recordProcessingStats({
     knowledgeId: input.knowledgeId,
     repoName: input.repoName,
     commitHash: input.commitHash,
-    modelTokens: {},
+    modelTokens: {
+      total: {
+        inputTokens: input.tokenUsage.inputTokens,
+        outputTokens: input.tokenUsage.outputTokens,
+      },
+    },
     estimatedCost,
     totalBatches: 1,
     totalFiles: input.filesAnalyzed,

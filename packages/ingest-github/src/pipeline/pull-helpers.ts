@@ -8,15 +8,23 @@ export interface PersistPullStatsInput {
   filesAnalyzed: number;
   foldersSummarised: number;
   processingTimeMs: number;
+  tokenUsage: { inputTokens: number; outputTokens: number };
 }
 
-export async function persistPullStats(input: PersistPullStatsInput): Promise<void> {
+export async function persistPullStats(
+  input: PersistPullStatsInput,
+): Promise<{ inputTokens: number; outputTokens: number }> {
   const estimatedCost = await estimateCostFromBreakdown({});
-  await recordProcessingStats({
+  return await recordProcessingStats({
     knowledgeId: input.knowledgeId,
     repoName: input.repoName,
     commitHash: input.commitHash,
-    modelTokens: {},
+    modelTokens: {
+      total: {
+        inputTokens: input.tokenUsage.inputTokens,
+        outputTokens: input.tokenUsage.outputTokens,
+      },
+    },
     estimatedCost,
     totalBatches: 1,
     totalFiles: input.filesAnalyzed,
