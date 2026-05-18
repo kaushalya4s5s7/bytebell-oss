@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest a new capability or improvement for Bytebell.
+title: "[feat] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea? Great — describe the problem first, then your proposal. Don't worry
+        about getting the architecture right; maintainers will help shape it during triage.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Be concrete — a real workflow, a repo you couldn't ingest, a query you couldn't run.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+      description: Your proposed solution. Rough sketches are fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you tried, other tools, or different shapes for the same idea.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, screenshots, prior art in other projects, related issues.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched existing issues and discussions and didn't find a duplicate.
+          required: true
