@@ -1,9 +1,8 @@
-import { Config, KnowledgeState, type GithubPullPayload, type JobMessage } from "@bb/types";
-import { getConfigValue } from "@bb/config";
+import { KnowledgeState, type GithubPullPayload, type JobMessage } from "@bb/types";
 import { getKnowledge, setKnowledgeCommit, setKnowledgeState } from "@bb/mongo";
 import { setKnowledgeStateInGraph, snapshotFilesToVersion, type NodeScope } from "@bb/neo4j";
-import { type AskLlmOptions } from "@bb/llm";
-import { describe, persistPullStats, repoNameFromUrl } from "./pull-helpers.ts";
+import { describe, persistStats, repoNameFromUrl } from "./stats.ts";
+import { resolveOrgId, llmCallContextFromPayload } from "./context.ts";
 import { IngestError, KnowledgeNotFoundError } from "@bb/errors";
 import { logger } from "@bb/logger";
 import { ensureMetaDirs, metaPathsFor, repoCloneDir, ensureReposRoot } from "./paths.ts";
@@ -14,6 +13,8 @@ import { computePullDiff, materialiseEndpoints } from "./pull-diff-resolver.ts";
 import { affectedFoldersFromDiff } from "./affected-folders.ts";
 import { createDiskSourceReader } from "./disk-source-reader.ts";
 import type { PullFactory, SourceReader, ArchiveSink } from "src/types/pipeline.ts";
+import type { ProgressContextFactory } from "src/progress/types.ts";
+import { nullProgressContextFactory } from "src/progress/NullProgressReporter.ts";
 import { analyseChangedFiles } from "src/strategies/flat-folder/analyse-changed.ts";
 import { processBigFilesQueue } from "src/strategies/flat-folder/phases/process-big-files.ts";
 import { backfillMissingFields } from "src/strategies/flat-folder/backfill/fields.ts";
@@ -29,32 +30,11 @@ import {
 
 const COMMIT_HASH_RE = /^[0-9a-f]{40}$/u;
 
-function resolveOrgId(payload: { orgId?: string }): string {
-  if (typeof payload.orgId === "string" && payload.orgId.length > 0) {
-    return payload.orgId;
-  }
-  return getConfigValue(Config.OrgId);
-}
-
-function llmCallContextFromPayload(payload: {
-  llmApiKey?: string;
-  llmProvider?: string;
-  llmModel?: string;
-}): AskLlmOptions | undefined {
-  const ctx: AskLlmOptions = {};
-  if (payload.llmApiKey !== undefined && payload.llmApiKey.length > 0) {
-    ctx.apiKey = payload.llmApiKey;
-  }
-  if (payload.llmProvider === "openrouter" || payload.llmProvider === "ollama") {
-    ctx.provider = payload.llmProvider;
-  }
-  if (payload.llmModel !== undefined && payload.llmModel.length > 0) {
-    ctx.model = payload.llmModel;
-  }
-  return Object.keys(ctx).length > 0 ? ctx : undefined;
-}
-
-export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: PullFactory): Promise<void> {
+export async function runPull(
+  msg: JobMessage<GithubPullPayload>,
+  pullFactory?: PullFactory,
+  progressContextFactory: ProgressContextFactory = nullProgressContextFactory,
+): Promise<void> {
   const { knowledgeId } = msg.payload;
   if (msg.payload.targetCommitHash !== undefined && !COMMIT_HASH_RE.test(msg.payload.targetCommitHash)) {
     throw new IngestError(
@@ -88,6 +68,7 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
   clearCancellation(knowledgeId);
   const startedAt = Date.now();
   await transitionState(knowledgeId, KnowledgeState.Processing);
+  const progressContext = progressContextFactory(knowledgeId);
 
   try {
     throwIfCancelled(knowledgeId);
@@ -169,6 +150,7 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
 
     const llmCallContext = llmCallContextFromPayload(msg.payload);
 
+    progressContext.phaseChanged("file_analysis");
     logger.info(`pull: phase per-file dispatcher for ${knowledgeId} starting`);
     throwIfCancelled(knowledgeId);
     const analyseChangedInput: Parameters<typeof analyseChangedFiles>[0] = {
@@ -177,6 +159,7 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
       metaPaths,
       analyzer: fileAnalyzer,
       diff,
+      progressContext,
     };
     if (llmCallContext !== undefined) {
       analyseChangedInput.llmCallContext = llmCallContext;
@@ -190,7 +173,12 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
 
     logger.info(`pull: phase process big files starting`);
     throwIfCancelled(knowledgeId);
-    const processBigFilesInput: Parameters<typeof processBigFilesQueue>[0] = { knowledgeId, source, metaPaths };
+    const processBigFilesInput: Parameters<typeof processBigFilesQueue>[0] = {
+      knowledgeId,
+      source,
+      metaPaths,
+      progressContext,
+    };
     if (llmCallContext !== undefined) {
       processBigFilesInput.llmCallContext = llmCallContext;
     }
@@ -200,16 +188,22 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
 
     logger.info(`pull: phase backfill fields starting`);
     throwIfCancelled(knowledgeId);
-    await backfillMissingFields(metaPaths, llmCallContext);
+    await backfillMissingFields(metaPaths, llmCallContext, progressContext);
 
     logger.info(`pull: phase backfill big-files starting`);
     throwIfCancelled(knowledgeId);
-    const backfillBigFilesInput: Parameters<typeof backfillBigFiles>[0] = { knowledgeId, source, metaPaths };
+    const backfillBigFilesInput: Parameters<typeof backfillBigFiles>[0] = {
+      knowledgeId,
+      source,
+      metaPaths,
+      progressContext,
+    };
     if (llmCallContext !== undefined) {
       backfillBigFilesInput.llmCallContext = llmCallContext;
     }
     await backfillBigFiles(backfillBigFilesInput);
 
+    progressContext.phaseChanged("folder_analysis");
     logger.info(`pull: phase selective folder summary (${affectedFolders.size} folders) starting`);
     throwIfCancelled(knowledgeId);
     const selectiveInput: Parameters<typeof runSelectiveFolderSummary>[0] = {
@@ -224,6 +218,7 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
     totalInputTokens += phase5.tokenUsage.inputTokens;
     totalOutputTokens += phase5.tokenUsage.outputTokens;
 
+    progressContext.phaseChanged("indexing");
     logger.info(`pull: phase repo summary starting`);
     throwIfCancelled(knowledgeId);
     const orgId = resolveOrgId({ ...(knowledge.source.kind === "github" ? {} : {}) });
@@ -246,7 +241,7 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
       affectedFolders,
     });
 
-    const stats = await persistPullStats({
+    const stats = await persistStats({
       knowledgeId,
       repoName: repoNameFromUrl(repoUrl),
       commitHash: targetCommit,
@@ -257,6 +252,7 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
     });
     await setKnowledgeCommit(knowledgeId, targetCommit, String(stats.inputTokens), String(stats.outputTokens));
     await transitionState(knowledgeId, KnowledgeState.Processed);
+    progressContext.completed("github_pull complete");
     logger.info(
       `pull: ${knowledgeId} ${currentCommit.slice(0, 12)} -> ${targetCommit.slice(0, 12)} done (filesUpserted=${stored.filesUpserted} filesDeleted=${stored.filesDeleted} foldersUpserted=${stored.foldersUpserted})`,
     );
@@ -267,6 +263,7 @@ export async function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: 
       throw cause;
     }
     await transitionState(knowledgeId, KnowledgeState.Failed).catch(() => undefined);
+    progressContext.failed(describe(cause));
     throw new IngestError(knowledgeId, `github_pull failed: ${describe(cause)}`, cause);
   }
 }

@@ -1,43 +1,20 @@
-import { Config, KnowledgeState, type GithubIndexPayload, type LocalIngestPayload } from "@bb/types";
-import { getConfigValue } from "@bb/config";
-import { recordProcessingStats, setKnowledgeCommit, setKnowledgeState } from "@bb/mongo";
-import { setKnowledgeStateInGraph } from "@bb/neo4j";
-import { estimateCostFromBreakdown, type AskLlmOptions } from "@bb/llm";
+import { KnowledgeState, type GithubIndexPayload, type LocalIngestPayload } from "@bb/types";
+import { setKnowledgeBranch, setKnowledgeCommit, setKnowledgeState } from "@bb/mongo";
+import { setKnowledgeBranchInGraph, setKnowledgeStateInGraph } from "@bb/neo4j";
 import { IngestError } from "@bb/errors";
 import { logger } from "@bb/logger";
 import type { IngestRunnerDeps, IngestRunnerInput } from "src/types/ingest-runner.ts";
 import type { IngestStrategy } from "src/types/strategy.ts";
 import type { ArchiveSink, PipelineSummary, SourceFactory, SourceReader } from "src/types/pipeline.ts";
+import type { ProgressContextFactory } from "src/progress/types.ts";
+import { nullProgressContextFactory } from "src/progress/NullProgressReporter.ts";
 import { ensureMetaDirs, ensureReposRoot, metaPathsFor, repoCloneDir } from "./paths.ts";
 import { readHeadCommitHash, syncRepository } from "./source.ts";
 import { resolveBranch } from "./branch.ts";
 import { CancellationError, clearCancellation, throwIfCancelled } from "./cancellation.ts";
 import { createDiskSourceReader } from "./disk-source-reader.ts";
-
-function resolveOrgId(payload: { orgId?: string }): string {
-  if (typeof payload.orgId === "string" && payload.orgId.length > 0) {
-    return payload.orgId;
-  }
-  return getConfigValue(Config.OrgId);
-}
-
-function llmCallContextFromPayload(payload: {
-  llmApiKey?: string;
-  llmProvider?: string;
-  llmModel?: string;
-}): AskLlmOptions | undefined {
-  const ctx: AskLlmOptions = {};
-  if (payload.llmApiKey !== undefined && payload.llmApiKey.length > 0) {
-    ctx.apiKey = payload.llmApiKey;
-  }
-  if (payload.llmProvider === "openrouter" || payload.llmProvider === "ollama") {
-    ctx.provider = payload.llmProvider;
-  }
-  if (payload.llmModel !== undefined && payload.llmModel.length > 0) {
-    ctx.model = payload.llmModel;
-  }
-  return Object.keys(ctx).length > 0 ? ctx : undefined;
-}
+import { resolveOrgId, llmCallContextFromPayload } from "./context.ts";
+import { describe, persistStats, repoNameFromUrl, localRepoName } from "./stats.ts";
 
 export interface CreatePipelineRunnerDeps {
   reposRootDir: string;
@@ -49,16 +26,23 @@ export interface CreatePipelineRunnerDeps {
    * supplies one.
    */
   sourceFactory?: SourceFactory;
+  /**
+   * Optional progress context factory. When provided, the runner emits
+   * pre-strategy phase changes (`clone`, `scan`) so SSE clients see liveness
+   * during the network/disk-bound prelude. Defaults to a no-op.
+   */
+  progressContextFactory?: ProgressContextFactory;
 }
 
 export function createPipelineRunner(deps: CreatePipelineRunnerDeps): IngestRunnerDeps {
+  const progressContextFactory = deps.progressContextFactory ?? nullProgressContextFactory;
   return {
     reposRootDir: deps.reposRootDir,
     strategy: deps.strategy,
     run: async (input: IngestRunnerInput): Promise<PipelineSummary> => {
       const payload = input.payload;
       if (isGithubPayload(payload)) {
-        return await runGithub(deps.strategy, payload, deps.sourceFactory);
+        return await runGithub(deps.strategy, payload, deps.sourceFactory, progressContextFactory);
       }
       return await runLocal(deps.strategy, payload);
     },
@@ -69,19 +53,25 @@ async function runGithub(
   strategy: IngestStrategy,
   payload: GithubIndexPayload,
   sourceFactory: SourceFactory | undefined,
+  progressContextFactory: ProgressContextFactory,
 ): Promise<PipelineSummary> {
   const { knowledgeId } = payload;
   clearCancellation(knowledgeId);
   const startedAt = Date.now();
   await transitionState(knowledgeId, KnowledgeState.Processing);
+  const progressContext = progressContextFactory(knowledgeId);
+  let strategyStarted = false;
   try {
     throwIfCancelled(knowledgeId);
-    const branch = resolveBranch(knowledgeId, payload);
+    const branch = await resolveBranch(knowledgeId, payload, payload.gitToken);
+    await setKnowledgeBranch(knowledgeId, branch);
+    await setKnowledgeBranchInGraph(knowledgeId, branch).catch(() => undefined);
 
     let source: SourceReader;
     let archiveSink: ArchiveSink | undefined;
     let commitHash: string;
 
+    progressContext.phaseChanged("clone");
     if (sourceFactory !== undefined) {
       const factoryResult = await sourceFactory({ knowledgeId, payload, branch });
       source = factoryResult.source;
@@ -107,6 +97,7 @@ async function runGithub(
       source = createDiskSourceReader({ repoDir, commitHash });
     }
 
+    progressContext.phaseChanged("scan");
     const metaPaths = metaPathsFor(knowledgeId);
     await ensureMetaDirs(metaPaths);
 
@@ -129,6 +120,7 @@ async function runGithub(
     if (archiveSink !== undefined) {
       strategyInput.archiveSink = archiveSink;
     }
+    strategyStarted = true;
     const result = await strategy.execute(strategyInput);
 
     const stats = await persistStats({
@@ -163,6 +155,9 @@ async function runGithub(
       throw cause;
     }
     await transitionState(knowledgeId, KnowledgeState.Failed).catch(() => undefined);
+    if (!strategyStarted) {
+      progressContext.failed(describe(cause));
+    }
     throw new IngestError(knowledgeId, `github_index pipeline failed: ${describe(cause)}`, cause);
   }
 }
@@ -221,63 +216,6 @@ async function transitionState(knowledgeId: string, state: KnowledgeState): Prom
   await setKnowledgeStateInGraph(knowledgeId, state).catch(() => undefined);
 }
 
-interface PersistStatsInput {
-  knowledgeId: string;
-  repoName: string;
-  commitHash: string;
-  filesAnalyzed: number;
-  foldersSummarised: number;
-  processingTimeMs: number;
-  tokenUsage: { inputTokens: number; outputTokens: number };
-}
-
-async function persistStats(input: PersistStatsInput): Promise<{ inputTokens: number; outputTokens: number }> {
-  const estimatedCost = await estimateCostFromBreakdown({});
-  return await recordProcessingStats({
-    knowledgeId: input.knowledgeId,
-    repoName: input.repoName,
-    commitHash: input.commitHash,
-    modelTokens: {
-      total: {
-        inputTokens: input.tokenUsage.inputTokens,
-        outputTokens: input.tokenUsage.outputTokens,
-      },
-    },
-    estimatedCost,
-    totalBatches: 1,
-    totalFiles: input.filesAnalyzed,
-    totalFolders: input.foldersSummarised,
-    filesAnalyzed: input.filesAnalyzed,
-    processingTimeMs: input.processingTimeMs,
-  });
-}
-
 function isGithubPayload(payload: GithubIndexPayload | LocalIngestPayload): payload is GithubIndexPayload {
   return (payload as GithubIndexPayload).repoUrl !== undefined;
-}
-
-function repoNameFromUrl(repoUrl: string): string {
-  try {
-    const segments = new URL(repoUrl).pathname
-      .split("/")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    const repo = segments.at(-1)?.replace(/\.git$/u, "");
-    const owner = segments.at(-2);
-    if (owner !== undefined && repo !== undefined) {
-      return `${owner}/${repo}`;
-    }
-  } catch {
-    // fall through
-  }
-  return repoUrl;
-}
-
-function localRepoName(rootDir: string): string {
-  const segments = rootDir.split("/").filter((s) => s.length > 0);
-  return segments.at(-1) ?? rootDir;
-}
-
-function describe(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }

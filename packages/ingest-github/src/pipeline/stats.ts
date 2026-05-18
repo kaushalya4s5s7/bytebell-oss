@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: AGPL-3.0-only WITH non-commercial-clause
+
 import { recordProcessingStats } from "@bb/mongo";
 import { estimateCostFromBreakdown } from "@bb/llm";
 
-export interface PersistPullStatsInput {
+export interface PersistStatsInput {
   knowledgeId: string;
   repoName: string;
   commitHash: string;
@@ -11,9 +13,7 @@ export interface PersistPullStatsInput {
   tokenUsage: { inputTokens: number; outputTokens: number };
 }
 
-export async function persistPullStats(
-  input: PersistPullStatsInput,
-): Promise<{ inputTokens: number; outputTokens: number }> {
+export async function persistStats(input: PersistStatsInput): Promise<{ inputTokens: number; outputTokens: number }> {
   const estimatedCost = await estimateCostFromBreakdown({});
   return await recordProcessingStats({
     knowledgeId: input.knowledgeId,
@@ -49,6 +49,11 @@ export function repoNameFromUrl(repoUrl: string): string {
     // fall through
   }
   return repoUrl;
+}
+
+export function localRepoName(rootDir: string): string {
+  const segments = rootDir.split("/").filter((s) => s.length > 0);
+  return segments.at(-1) ?? rootDir;
 }
 
 export function describe(cause: unknown): string {

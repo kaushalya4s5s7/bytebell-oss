@@ -29,6 +29,7 @@
       "dependencies": {
         "@bb/config": "workspace:*",
         "@bb/errors": "workspace:*",
+        "@bb/ingest-github": "workspace:*",
         "@bb/logger": "workspace:*",
         "@bb/types": "workspace:*",
         "commander": "^14.0.3",
@@ -123,6 +124,7 @@
       "dependencies": {
         "@bb/config": "workspace:*",
         "@bb/errors": "workspace:*",
+        "@bb/mongo": "workspace:*",
         "@bb/types": "workspace:*",
         "neo4j-driver": "^6.0.1",
       },
