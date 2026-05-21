@@ -51,9 +51,15 @@ infra/docker/docker-compose.yml up -d`, polls
   via `setConfigValue`, compose env is regenerated, retry). Up to
   four conflict rounds before giving up.
 - `bytebell shutdown` — sends SIGTERM to the server PID, polls until
-  the PID file vanishes (≤ 30 s), and prints the `docker compose down`
-  hint. Docker infra is **left running** by design — warm re-boots are
-  fast.
+  the PID file vanishes (≤ 30 s), then asks (Ink prompt
+  `StopInfraPrompt.tsx`) whether to stop Docker infra too. Default
+  answer is **Yes** (Enter tears down `mongo + neo4j + redis` via
+  `docker compose down --remove-orphans`); pressing `n` / Esc keeps the
+  containers running for fast warm re-boots and prints the manual
+  `docker compose down` hint. The prompt is skipped when stdin isn't a
+  TTY (CI-safe — falls back to keeping infra up). Two flags override
+  the prompt deterministically: `--with-docker` always stops infra,
+  `--keep-docker` always leaves it running; passing both is rejected.
 - `bytebell server start` — low-level wrapper that spawns the server
   in the foreground (Ctrl+C to stop). Used during dev; everyday users
   prefer `bytebell boot`.
