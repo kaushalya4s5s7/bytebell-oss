@@ -69,8 +69,16 @@ scanAndClassify
 │                       │  (Promise.all, share one limiter)
 └── analyseBigFiles ────┘
         ↓
+FileAnalysisCache.loadAll  (one parallel readdir+readFile pass)
+        ↓
 backfillMissingFields → backfillBigFiles → folderSummary → repoSummary → storeFlatAnalysis
+   (cache read+write)         (no cache)     (cache read)                 (cache read)
 ```
+
+`FileAnalysisCache` is a `Map<relativePath, CondensedFileAnalysis>` loaded
+once between phase 2 and phase 3. Phases 3, 5, 7 all consume the same
+instance — phase 3 also calls `cache.set(...)` after each backfill write
+so phases 5 and 7 see the updated entries without re-reading disk.
 
 ## Public interfaces
 
@@ -99,6 +107,9 @@ backfillMissingFields → backfillBigFiles → folderSummary → repoSummary →
 - Phase 2b writes per-chunk JSON (`chunks/<file>/chunk-N.json`),
   per-file chunk manifests (`<file>.manifest.json`), and condensed JSON
   for big files.
+- `FileAnalysisCache` is an in-memory artifact owned by the strategy
+  run (not persisted). It loads from `fileAnalysisDir` once and is
+  passed by reference to phases 3, 5, and 7.
 - Phase 7 owns no disk artifacts. It reads on-disk state produced by
   Phases 1–6 and writes Neo4j nodes (`:Repo`, `:Folder`, `:File`) plus
   the `CONTAINS` edge.

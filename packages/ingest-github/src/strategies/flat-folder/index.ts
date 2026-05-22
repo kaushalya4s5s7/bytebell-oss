@@ -11,6 +11,7 @@ import { analyseSmallFiles } from "./phases/analyse-small.ts";
 import { analyseBigFiles } from "./phases/process-big-files.ts";
 import { backfillMissingFields } from "./backfill/fields.ts";
 import { backfillBigFiles } from "./backfill/big-files.ts";
+import { FileAnalysisCache } from "./file-analysis-cache.ts";
 import { runFolderSummaryPhase } from "./folder-summary.ts";
 import { makeRepoSummaryEnvelope, persistRepoSummary, summariseRepo } from "./repo-summary.ts";
 import { storeFlatAnalysis } from "./phases/store-flat-analysis.ts";
@@ -87,9 +88,13 @@ export function createFlatFolderStrategy(deps: FlatFolderStrategyDeps): IngestSt
         let totalOutputTokens = smallResult.tokenUsage.outputTokens + bigResult.tokenUsage.outputTokens;
         let totalCostUsd = smallResult.tokenUsage.costUsd + bigResult.tokenUsage.costUsd;
 
+        logger.info(`flat-folder: loading file-analysis cache`);
+        throwIfCancelled(knowledgeId);
+        const fileAnalysisCache = await FileAnalysisCache.loadAll(metaPaths);
+
         logger.info(`flat-folder: phase3 (backfill missing fields) starting`);
         throwIfCancelled(knowledgeId);
-        await backfillMissingFields(metaPaths, llmCallContext, progressContext);
+        await backfillMissingFields(metaPaths, fileAnalysisCache, llmCallContext, progressContext);
 
         logger.info(`flat-folder: phase4 (backfill big files) starting`);
         throwIfCancelled(knowledgeId);
@@ -107,7 +112,13 @@ export function createFlatFolderStrategy(deps: FlatFolderStrategyDeps): IngestSt
         progressContext.phaseChanged("folder_analysis");
         logger.info(`flat-folder: phase5 (folder summaries) starting`);
         throwIfCancelled(knowledgeId);
-        const phase5 = await runFolderSummaryPhase(knowledgeId, metaPaths, llmCallContext, progressContext);
+        const phase5 = await runFolderSummaryPhase(
+          knowledgeId,
+          metaPaths,
+          fileAnalysisCache,
+          llmCallContext,
+          progressContext,
+        );
         totalInputTokens += phase5.tokenUsage.inputTokens;
         totalOutputTokens += phase5.tokenUsage.outputTokens;
         totalCostUsd += phase5.tokenUsage.costUsd;
@@ -136,6 +147,7 @@ export function createFlatFolderStrategy(deps: FlatFolderStrategyDeps): IngestSt
           payload,
           branch,
           metaPaths,
+          cache: fileAnalysisCache,
           progressContext,
         });
 

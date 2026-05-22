@@ -4,8 +4,8 @@ import { logger } from "@bb/logger";
 import type { FileAnalysis, FileAnalysisSection } from "@bb/mongo";
 import type { MetaPaths } from "#src/types/meta-paths.ts";
 import type { ProgressContext } from "#src/progress/types.ts";
-import { iterateCondensed } from "#src/strategies/flat-folder/big-file/storage.ts";
 import { saveCondensed } from "#src/strategies/flat-folder/big-file/storage.ts";
+import type { FileAnalysisCache } from "#src/strategies/flat-folder/file-analysis-cache.ts";
 import { BACKFILL_SYSTEM_PROMPT, buildBackfillUserPrompt } from "#src/strategies/flat-folder/prompts/backfill.ts";
 
 const EXTENDED_ARRAY_KEYS = [
@@ -44,6 +44,7 @@ interface NeededFlags {
 
 export async function backfillMissingFields(
   metaPaths: MetaPaths,
+  cache: FileAnalysisCache,
   llmCallContext?: AskLlmOptions,
   progressContext?: ProgressContext,
 ): Promise<{ updated: number; failed: number }> {
@@ -52,12 +53,11 @@ export async function backfillMissingFields(
   const reporter = progressContext?.reporter({
     phase: "file_analysis",
     subPhase: "backfill",
-    total: { kind: "growing" },
+    total: { kind: "fixed", total: cache.size },
   });
   await reporter?.start();
   try {
-    for await (const entry of iterateCondensed(metaPaths)) {
-      reporter?.incrementSeen();
+    for (const entry of cache.values()) {
       const a = entry.analysis;
       const needed = computeNeeded(a);
       if (!hasAnyMissing(needed)) {
@@ -74,6 +74,7 @@ export async function backfillMissingFields(
         }
         applyBackfill(a, result, needed);
         await saveCondensed(metaPaths, entry);
+        cache.set(entry);
         updated += 1;
       } catch (cause: unknown) {
         if (cause instanceof LlmConfigError || cause instanceof LlmError) {

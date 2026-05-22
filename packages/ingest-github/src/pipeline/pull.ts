@@ -20,6 +20,7 @@ import { analyseChangedFiles } from "#src/strategies/flat-folder/analyse-changed
 import { processBigFilesQueue } from "#src/strategies/flat-folder/phases/process-big-files.ts";
 import { backfillMissingFields } from "#src/strategies/flat-folder/backfill/fields.ts";
 import { backfillBigFiles } from "#src/strategies/flat-folder/backfill/big-files.ts";
+import { FileAnalysisCache } from "#src/strategies/flat-folder/file-analysis-cache.ts";
 import { runSelectiveFolderSummary } from "#src/strategies/flat-folder/folder-summary-selective.ts";
 import {
   makeRepoSummaryEnvelope,
@@ -192,9 +193,13 @@ export async function runPull(
     totalOutputTokens += phase2.tokenUsage.outputTokens;
     totalCostUsd += phase2.tokenUsage.costUsd;
 
+    logger.info(`pull: loading file-analysis cache`);
+    throwIfCancelled(knowledgeId);
+    const fileAnalysisCache = await FileAnalysisCache.loadAll(metaPaths);
+
     logger.info(`pull: phase backfill fields starting`);
     throwIfCancelled(knowledgeId);
-    await backfillMissingFields(metaPaths, llmCallContext, progressContext);
+    await backfillMissingFields(metaPaths, fileAnalysisCache, llmCallContext, progressContext);
 
     logger.info(`pull: phase backfill big-files starting`);
     throwIfCancelled(knowledgeId);
@@ -215,6 +220,7 @@ export async function runPull(
     const selectiveInput: Parameters<typeof runSelectiveFolderSummary>[0] = {
       knowledgeId,
       metaPaths,
+      cache: fileAnalysisCache,
       affectedFolders,
     };
     if (llmCallContext !== undefined) {

@@ -139,6 +139,14 @@ worker hardcodes a single `IngestionStrategy` instance (currently
 - `meta-output/bigFiles.json` — legacy view written alongside the manifest
   for the pull-path and backfill phases. The main strategy no longer
   consumes it directly.
+- `FileAnalysisCache` (in-memory only, not persisted) — single
+  `Map<relativePath, CondensedFileAnalysis>` loaded once between the
+  analyse and backfill phases via parallel `readdir + readFile`. Replaces
+  three sequential `iterateCondensed` walks (phases 3, 5, 7) with one
+  parallel preload + three in-memory iterations. The pull workflow loads
+  its own cache instance; only one strategy run owns a given
+  `metaPaths` directory at a time. For repos beyond ~50k analysed files
+  consider a streaming-mode fallback (not implemented today).
 
 ## Invariants
 

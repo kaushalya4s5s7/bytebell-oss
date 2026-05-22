@@ -4,7 +4,7 @@ import { ensureFlatFolderIndexes, upsertFileNode, upsertFolderNode, upsertRepoNo
 import type { GithubIndexPayload } from "@bb/types";
 import type { MetaPaths } from "#src/types/meta-paths.ts";
 import { throwIfCancelled } from "#src/pipeline/cancellation.ts";
-import { iterateCondensed } from "#src/strategies/flat-folder/big-file/storage.ts";
+import type { FileAnalysisCache } from "#src/strategies/flat-folder/file-analysis-cache.ts";
 import { iterateFolderSummaries } from "#src/strategies/flat-folder/folder-summary.ts";
 import { directFolderOf } from "#src/strategies/flat-folder/folder-path.ts";
 import { languageFromPath } from "#src/adapters/llm-file-analyzer.ts";
@@ -16,6 +16,7 @@ export interface StoreFlatAnalysisInput {
   payload: GithubIndexPayload;
   branch: string;
   metaPaths: MetaPaths;
+  cache: FileAnalysisCache;
   progressContext?: ProgressContext;
 }
 
@@ -89,13 +90,12 @@ export async function storeFlatAnalysis(input: StoreFlatAnalysisInput): Promise<
   const fileReporter = input.progressContext?.reporter({
     phase: "indexing",
     subPhase: "files",
-    total: { kind: "growing" },
+    total: { kind: "fixed", total: input.cache.size },
   });
   await fileReporter?.start();
   try {
-    for await (const file of iterateCondensed(input.metaPaths)) {
+    for (const file of input.cache.values()) {
       throwIfCancelled(input.scope.knowledgeId);
-      fileReporter?.incrementSeen();
       const folderPath = directFolderOf(file.relativePath);
       if (!folderPaths.has(folderPath)) {
         await upsertFolderNode({

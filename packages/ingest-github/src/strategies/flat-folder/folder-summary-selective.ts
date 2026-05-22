@@ -5,6 +5,7 @@ import type { AskLlmOptions } from "@bb/llm";
 import type { MetaPaths } from "#src/types/meta-paths.ts";
 import { withConcurrency } from "#src/pipeline/concurrency.ts";
 import { throwIfCancelled, CancellationError } from "#src/pipeline/cancellation.ts";
+import type { FileAnalysisCache } from "#src/strategies/flat-folder/file-analysis-cache.ts";
 import {
   groupByDirectFolder,
   persistFolderSummary,
@@ -14,6 +15,7 @@ import {
 export interface SelectiveFolderSummaryInput {
   knowledgeId: string;
   metaPaths: MetaPaths;
+  cache: FileAnalysisCache;
   affectedFolders: Set<string>;
   llmCallContext?: AskLlmOptions;
 }
@@ -35,7 +37,7 @@ export async function runSelectiveFolderSummary(
 ): Promise<SelectiveFolderSummaryResult> {
   const concurrentWorkers = getConfigValue(Config.ConcurrentWorkers);
   const limit = withConcurrency(concurrentWorkers);
-  const groups = await groupByDirectFolder(input.metaPaths);
+  const groups = groupByDirectFolder(input.cache);
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;

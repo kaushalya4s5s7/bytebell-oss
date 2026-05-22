@@ -11,14 +11,14 @@ import { encodeMetaPath } from "#src/pipeline/paths.ts";
 import { withConcurrency } from "#src/pipeline/concurrency.ts";
 import { throwIfCancelled, CancellationError } from "#src/pipeline/cancellation.ts";
 import type { ProgressContext } from "#src/progress/types.ts";
-import { iterateCondensed } from "./big-file/storage.ts";
+import type { FileAnalysisCache } from "./file-analysis-cache.ts";
 import { directFolderOf } from "./folder-path.ts";
 import { FOLDER_ANALYSIS_SYSTEM_PROMPT, folderAnalysisUserPrompt } from "./prompts/folder-summary.ts";
 import type { FolderSummary } from "./types.ts";
 
-export async function groupByDirectFolder(metaPaths: MetaPaths): Promise<Map<string, CondensedFileAnalysis[]>> {
+export function groupByDirectFolder(cache: FileAnalysisCache): Map<string, CondensedFileAnalysis[]> {
   const groups = new Map<string, CondensedFileAnalysis[]>();
-  for await (const entry of iterateCondensed(metaPaths)) {
+  for (const entry of cache.values()) {
     const folder = directFolderOf(entry.relativePath);
     const bucket = groups.get(folder) ?? [];
     bucket.push(entry);
@@ -113,6 +113,7 @@ export async function* iterateFolderSummaries(metaPaths: MetaPaths): AsyncGenera
 export async function runFolderSummaryPhase(
   knowledgeId: string,
   metaPaths: MetaPaths,
+  cache: FileAnalysisCache,
   llmCallContext?: AskLlmOptions,
   progressContext?: ProgressContext,
 ): Promise<{
@@ -122,7 +123,7 @@ export async function runFolderSummaryPhase(
 }> {
   const concurrentWorkers = getConfigValue(Config.ConcurrentWorkers);
   const limit = withConcurrency(concurrentWorkers);
-  const groups = await groupByDirectFolder(metaPaths);
+  const groups = groupByDirectFolder(cache);
   let succeeded = 0;
   let failed = 0;
   let totalInputTokens = 0;
