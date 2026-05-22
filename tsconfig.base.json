@@ -6,6 +6,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
+    "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
@@ -36,12 +37,9 @@
 
     "types": ["bun"],
 
-    "composite": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "incremental": true,
-    "noEmit": false,
-    "emitDeclarationOnly": true
+    "composite": false,
+    "declaration": false,
+    "noEmit": true,
+    "incremental": true
   }
 }
