@@ -4,8 +4,9 @@ import { logger } from "@bb/logger";
 import type { FileAnalysis, FileAnalysisSection } from "@bb/mongo";
 import type { MetaPaths } from "#src/types/meta-paths.ts";
 import type { ProgressContext } from "#src/progress/types.ts";
-import { iterateCondensed } from "#src/strategies/flat-folder/big-file/storage.ts";
+import type { ConcurrencyLimiter } from "#src/pipeline/concurrency.ts";
 import { saveCondensed } from "#src/strategies/flat-folder/big-file/storage.ts";
+import type { FileAnalysisCache } from "#src/strategies/flat-folder/file-analysis-cache.ts";
 import { BACKFILL_SYSTEM_PROMPT, buildBackfillUserPrompt } from "#src/strategies/flat-folder/prompts/backfill.ts";
 
 const EXTENDED_ARRAY_KEYS = [
@@ -44,46 +45,58 @@ interface NeededFlags {
 
 export async function backfillMissingFields(
   metaPaths: MetaPaths,
+  cache: FileAnalysisCache,
+  limiter: ConcurrencyLimiter,
   llmCallContext?: AskLlmOptions,
   progressContext?: ProgressContext,
 ): Promise<{ updated: number; failed: number }> {
   let updated = 0;
   let failed = 0;
+  let dispatched = 0;
   const reporter = progressContext?.reporter({
     phase: "file_analysis",
     subPhase: "backfill",
-    total: { kind: "growing" },
+    total: { kind: "fixed", total: cache.size },
   });
   await reporter?.start();
   try {
-    for await (const entry of iterateCondensed(metaPaths)) {
-      reporter?.incrementSeen();
+    const tasks: Promise<void>[] = [];
+    for (const entry of cache.values()) {
       const a = entry.analysis;
       const needed = computeNeeded(a);
       if (!hasAnyMissing(needed)) {
         reporter?.increment(1, { fileName: entry.relativePath });
         continue;
       }
-      const userPrompt = buildBackfillUserPrompt(entry.relativePath, entry.analysis);
-      try {
-        const response = await askJsonLLM<BackfillJson>(BACKFILL_SYSTEM_PROMPT, userPrompt, llmCallContext ?? {});
-        const result = response.result;
-        if (result === null) {
-          reporter?.increment(1, { fileName: entry.relativePath });
-          continue;
-        }
-        applyBackfill(a, result, needed);
-        await saveCondensed(metaPaths, entry);
-        updated += 1;
-      } catch (cause: unknown) {
-        if (cause instanceof LlmConfigError || cause instanceof LlmError) {
-          throw cause;
-        }
-        failed += 1;
-        logger.warn(`phase3: backfill failed for ${entry.relativePath}: ${describe(cause)}`);
-      }
-      reporter?.increment(1, { fileName: entry.relativePath });
+      dispatched += 1;
+      tasks.push(
+        limiter(async () => {
+          const userPrompt = buildBackfillUserPrompt(entry.relativePath, entry.analysis);
+          try {
+            const response = await askJsonLLM<BackfillJson>(BACKFILL_SYSTEM_PROMPT, userPrompt, llmCallContext ?? {});
+            const result = response.result;
+            if (result === null) {
+              reporter?.increment(1, { fileName: entry.relativePath });
+              return;
+            }
+            applyBackfill(a, result, needed);
+            await saveCondensed(metaPaths, entry);
+            cache.set(entry);
+            updated += 1;
+          } catch (cause: unknown) {
+            if (cause instanceof LlmConfigError || cause instanceof LlmError) {
+              throw cause;
+            }
+            failed += 1;
+            logger.warn(`phase3: backfill failed for ${entry.relativePath}: ${describe(cause)}`);
+          } finally {
+            reporter?.increment(1, { fileName: entry.relativePath });
+          }
+        }),
+      );
     }
+    logger.info(`phase3 dispatching ${dispatched} backfill tasks`);
+    await Promise.all(tasks);
     logger.info(`phase3 done: updated=${updated} failed=${failed}`);
     return { updated, failed };
   } finally {

@@ -1,26 +1,8 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "composite": false,
-    "declaration": false,
-    "declarationMap": false,
     "noEmit": true
   },
-  "files": [],
-  "references": [
-    { "path": "packages/types" },
-    { "path": "packages/errors" },
-    { "path": "packages/config" },
-    { "path": "packages/logger" },
-    { "path": "packages/mongo" },
-    { "path": "packages/redis" },
-    { "path": "packages/queue" },
-    { "path": "packages/llm" },
-    { "path": "packages/ingest-github" },
-    { "path": "packages/ingest-business-context" },
-    { "path": "packages/cli" },
-    { "path": "packages/server" },
-    { "path": "packages/neo4j" },
-    { "path": "packages/mcp" }
-  ]
+  "include": ["packages/*/src/**/*.ts", "packages/*/src/**/*.tsx", "packages/*/src/**/*.json"],
+  "exclude": ["**/node_modules", "**/dist", "**/*.d.ts"]
 }

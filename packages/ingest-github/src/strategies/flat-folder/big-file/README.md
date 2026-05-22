@@ -27,8 +27,11 @@ depending on chunk count and prompt budget.
 - `storage.ts` — on-disk cache (chunk JSON, manifest, condensed analysis) +
   `iterateCondensed(metaPaths)` async iterator used by Phase 5.
 - `cache.ts` — `inspect(metaPaths, relativePath)` returns `complete`,
-  `stale-condensed`, or `missing`. Used by Phase 2 to short-circuit and by
-  Phase 4 to find candidates for cheap re-condense.
+  `stale-condensed`, or `missing`. Used by Phase 2 to short-circuit
+  already-finished big files on resume. The chunk task queue then
+  re-uses cached chunks via `loadChunkIfPresent` and re-runs condense
+  to recover any `stale-condensed` files — this is the crash-recovery
+  pathway that replaced the deleted Phase 4 backfill.
 - `index.ts` — `processBigFile({knowledgeId, metaPaths, relativePath, content,
 sizeBytes, llmCallContext?, progressContext?})`. Sequential per file
   (chunk-level concurrency inside). Persists every intermediate artifact,
@@ -42,11 +45,32 @@ sizeBytes, llmCallContext?, progressContext?})`. Sequential per file
   so long single-file analyses surface as live `PHASE_TICK` envelopes
   carrying per-chunk progress instead of looking frozen.
 
+## Two callers
+
+These leaf helpers (`splitFileIntoChunks`, `analyzeChunk`, `condenseChunks`,
+the storage / cache primitives) are consumed by **two** drivers:
+
+- `processBigFile` (`index.ts`) — legacy serial driver. One big file at a
+  time, chunks-within-file parallel under `Config.BigFileConcurrency`,
+  followed by a blocking condense. Used today only by the pull-path
+  (`pipeline/pull.ts`) via `processBigFilesQueue`.
+- `analyseBigFiles` (`phases/process-big-files.ts`) — manifest-driven
+  chunk-task queue used by the main strategy entry. Every chunk of every
+  big file is an independent task scheduled through a strategy-wide
+  shared `ConcurrencyLimiter`. As soon as a file's last chunk lands,
+  that file's `condenseChunks` is scheduled through the same limiter
+  (with one in-place retry on transient failure) — multiple condenses
+  run in parallel with chunks of slower files. Reuses
+  `splitFileIntoChunks`, `analyzeChunk`, `condenseChunks`, and the
+  storage helpers without modification.
+
 ## Invariants
 
-- One big file at a time. Concurrency lives at the chunk level inside
-  `processBigFile`, never across files, to bound peak memory.
 - Every artifact is durable on disk before the next step. The chunk cache
-  short-circuits on re-runs; the manifest plus condensed JSON are the
-  Phase 7 graph-store inputs.
-- Cancellation is checked between chunks (`throwIfCancelled(knowledgeId)`).
+  short-circuits on re-runs (per-chunk granularity, not per-file); the
+  manifest plus condensed JSON are the Phase 7 graph-store inputs.
+- Cancellation is checked between chunks and before each condense
+  dispatch (`throwIfCancelled(knowledgeId)`).
+- `bigFiles.json` is now a derived view written by `scanAndClassify`.
+  The main strategy reads it indirectly via the manifest; the legacy
+  drivers (pull-path + backfill) continue to read it directly.
