@@ -34,6 +34,7 @@ export enum Config {
   DbProvider = "db_provider",
   GraphProvider = "graph_provider",
   SqlitePath = "sqlite_path",
+  LadybugPath = "ladybug_path",
 }
 
 export enum DbProviderType {

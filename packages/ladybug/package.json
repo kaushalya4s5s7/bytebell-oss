@@ -1,5 +1,5 @@
 {
-  "name": "@bb/ingest-github",
+  "name": "@bb/ladybug",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,18 +13,10 @@
   },
   "dependencies": {
     "@bb/config": "workspace:*",
-    "@bb/db": "workspace:*",
     "@bb/errors": "workspace:*",
     "@bb/graph-db": "workspace:*",
-    "@bb/llm": "workspace:*",
-    "@bb/logger": "workspace:*",
-    "@bb/mongo": "workspace:*",
-    "@bb/sqlite": "workspace:*",
-    "@bb/neo4j": "workspace:*",
-    "@bb/ladybug": "workspace:*",
-    "@bb/queue": "workspace:*",
-    "@bb/db-core": "workspace:*",
     "@bb/graph-core": "workspace:*",
-    "@bb/types": "workspace:*"
+    "@bb/types": "workspace:*",
+    "@ladybugdb/core": "^0.16.1"
   }
 }

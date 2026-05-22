@@ -52,6 +52,7 @@ export const configSchema = z
     db_provider: z.string().default("sqlite"),
     graph_provider: z.string().default("neo4j"),
     sqlite_path: z.string().default(""),
+    ladybug_path: z.string().default(""),
   })
   .strict();
 
@@ -95,6 +96,7 @@ export type ConfigValueMap = {
   [Config.DbProvider]: string;
   [Config.GraphProvider]: string;
   [Config.SqlitePath]: string;
+  [Config.LadybugPath]: string;
 };
 
 export type ConfigValue<K extends Config> = ConfigValueMap[K];
@@ -152,6 +154,7 @@ export const HINTS: Readonly<Record<Config, string>> = {
   [Config.DbProvider]: "bytebell set db-provider <mongo|...>",
   [Config.GraphProvider]: "bytebell set graph-provider <neo4j|...>",
   [Config.SqlitePath]: "bytebell set sqlite-path <path>",
+  [Config.LadybugPath]: "bytebell set ladybug-path <path>",
 };
 
 export { readField, writeField } from "./schema-fields.ts";
