@@ -50,7 +50,12 @@ The package does **not** own:
   strategies can add this)
 - Semantic chunking, big-file processing, smart sampling (future
   strategies)
-- Recovery / progress reporting / failed-files tracking
+- Recovery / failed-files tracking
+- Progress **transport** — the package now ships a `ProgressContext`
+  extension port under `src/progress/` (see that folder's README), but
+  the actual SSE / Pub-Sub plumbing lives in the host binary's progress
+  package. The OSS default (`nullProgressContextFactory`) discards every
+  event, consistent with the no-outbound-calls posture.
 - Provider abstraction (no Bitbucket support; GitHub-only)
 - Concurrency control (sequential per-file processing intentional for
   v0; revisit when users complain)
@@ -58,14 +63,53 @@ The package does **not** own:
 ## Public exports
 
 ```ts
-function registerGithubWorkers():        void   // wires JobType.GithubIndex
-function registerLocalIngestWorker():    void   // wires JobType.LocalIngest
+// High-level registration (OSS standalone wires this once at boot)
+function registerGithubWorkers(deps?: RegisterGithubWorkersDeps): void; // wires GithubIndex + GithubPull
+function registerLocalIngestWorker(): void; // wires LocalIngest
 
-interface IngestionContext  { knowledgeId: string; rootDir: string }
-interface IngestionStrategy { readonly name: string; ingest(ctx: IngestionContext): Promise<void> }
+interface RegisterGithubWorkersDeps {
+  sourceFactory?: SourceFactory; // index-side hook
+  pullFactory?: PullFactory; // pull-side hook (provides reader + diff + targetCommit)
+  progressContextFactory?: ProgressContextFactory; // SSE progress hook (default: no-op)
+}
 
-class BasicFileAnalysisStrategy implements IngestionStrategy
+// Lower-level building blocks (downstream consumers with their own queue
+// skip registerGithubWorkers and wire these against their own registry)
+function createPipelineRunner(deps: CreatePipelineRunnerDeps): IngestRunnerDeps;
+function createGithubIngestHandler(deps: IngestJobHandlerDeps): (msg) => Promise<void>;
+function createLocalIngestHandler(deps: IngestJobHandlerDeps): (msg) => Promise<void>;
+function runPull(msg: JobMessage<GithubPullPayload>, pullFactory?: PullFactory): Promise<void>;
+function reposRoot(): string;
+function repoCloneDir(knowledgeId: string): string;
+function metaRootFor(knowledgeId: string): string;
+function metaPathsFor(knowledgeId: string): MetaPaths;
+function commitMetaDir(knowledgeId: string, commitHash: string): string;
+function businessContextDir(knowledgeId: string, commitHash: string, sanitizedTitle: string): string;
+function orgRegistryDir(knowledgeId: string, orgId: string): string;
+
+function createFlatFolderStrategy(deps): IngestStrategy;
+function createLlmFileAnalyzer(deps): FileAnalyzer;
+function createDiskSourceReader(deps): SourceReader;
 ```
+
+The optional `sourceFactory` lets downstream consumers inject a custom
+`SourceReader` for index jobs (no local clone). The analogous
+`pullFactory` does the same for pull jobs — its result carries the
+resolved `targetCommit`, the diff between currentCommit and targetCommit,
+and a reader pinned at the target. When unset, both fall back to the
+default disk-backed paths (`git clone` for index, `git fetch + diff +
+checkout` for pull). See [docs/extension-points.md](docs/extension-points.md)
+for the design rationale.
+
+For per-job LLM credentials, downstream consumers set
+`{ llmApiKey?, llmProvider?, llmModel?, llmKeyId? }` on the
+`GithubIndexPayload` / `GithubPullPayload` they enqueue
+(`PayloadLlmOverrides` from `@bb/types`). The runner extracts those into
+`StrategyContext.llmCallContext` and every LLM call site forwards it to
+`@bb/llm`. `llmProvider` is `string` (open) so multi-provider consumers
+can carry richer taxonomies; the OSS LLM client narrows to
+`openrouter`/`ollama` at the boundary. OSS standalone leaves the overrides
+unset and falls back to `Config.OpenrouterApiKey` + `Config.LlmProvider`.
 
 Both `register*Workers()` calls run once at `@bb/server` boot. The
 worker hardcodes a single `IngestionStrategy` instance (currently
@@ -88,25 +132,51 @@ worker hardcodes a single `IngestionStrategy` instance (currently
 - `:File` graph nodes + `:HAS_FILE` / `:HAS_KEYWORD` / `:HAS_CLASS` /
   `:HAS_FUNCTION` / `:HAS_IMPORT_INTERNAL` / `:HAS_IMPORT_EXTERNAL` relationships — written via
   `upsertFileNode` from `@bb/neo4j`.
+- `meta-output/scan-manifest.json` — the canonical small/big/oversized
+  classification produced by Phase 1 (`scanAndClassify`). Per-file entries
+  carry `tokenCount`, `kind`, and (for big files) `estimatedChunks`.
+  Phases 2a (small) and 2b (big) consume the manifest in parallel.
+- `meta-output/bigFiles.json` — legacy view written alongside the manifest
+  for the pull-path and backfill phases. The main strategy no longer
+  consumes it directly.
+- `FileAnalysisCache` (in-memory only, not persisted) — single
+  `Map<relativePath, CondensedFileAnalysis>` loaded once between the
+  analyse and backfill phases via parallel `readdir + readFile`. Replaces
+  three sequential `iterateCondensed` walks (phases 3, 5, 7) with one
+  parallel preload + three in-memory iterations. The pull workflow loads
+  its own cache instance; only one strategy run owns a given
+  `metaPaths` directory at a time. For repos beyond ~50k analysed files
+  consider a streaming-mode fallback (not implemented today).
 
 ## Invariants
 
-1. **Sequential per-file processing.** Intentionally degraded; one
-   `upsertRawFile` per file. The small-file path issues one `askLLM`;
-   the big-file path issues N (one per chunk) plus condensation calls,
-   all sequential — no `Promise.all`, no concurrency cap. Revisit when
-   the latency profile demands it.
-2. **Clone idempotent.** Re-runs (BullMQ retries) call `git fetch` +
+1. **Shared LLM concurrency limiter.** The flat-folder strategy
+   constructs one `withConcurrency(Config.LlmConcurrency)` instance at
+   entry (default 29). The small-file phase, the big-file chunk phase,
+   per-file condense calls, **and the folder-summary phase** all check
+   out from this single pool, so total in-flight LLM calls is bounded
+   by one knob. The pull-path constructs its own shared limiter at
+   `runPull` entry and threads it into the selective folder-summary
+   phase. The legacy `processBigFile` driver used by the pull-path
+   still uses its own per-file pool sized by `Config.BigFileConcurrency`.
+2. **Folder-summary batching by default.** Phase 5 groups small folders
+   (`≤ Config.FolderSummaryBatchMaxFiles`, default 15) into batches of
+   up to `Config.FolderSummaryBatchSize` (default 10) and asks the LLM
+   for one JSON object keyed by integer label that returns one summary
+   per folder. Bigger folders take the individual single-folder path.
+   Roll back to one LLM call per folder via
+   `bytebell set folder.summary.batch.size 1`.
+3. **Clone idempotent.** Re-runs (BullMQ retries) call `git fetch` +
    `git reset --hard` in the existing dir rather than re-cloning.
    Tokens are re-injected into the remote URL each time.
-3. **Token redaction.** `GitCloneError` carries the **redacted** repo
+4. **Token redaction.** `GitCloneError` carries the **redacted** repo
    URL (`https://user:***@host`) — the raw `gitToken` never appears in
    error messages or logs.
-4. **State transition order.** `Processing` is set _before_ any clone
+5. **State transition order.** `Processing` is set _before_ any clone
    work. `Processed` is set _only_ after the entire scan + analyze loop
    completes. On any thrown error, the handler best-effort sets `Failed`
    then re-throws so BullMQ records the retry.
-5. **Fail-soft analysis, fail-hard infra.** A single file's LLM call
+6. **Fail-soft analysis, fail-hard infra.** A single file's LLM call
    failing falls back to an empty-analysis Raw doc and processing
    continues. In the big-file path, a single chunk failure contributes
    an empty analysis to the merge but does not stop the file; a
@@ -114,7 +184,7 @@ worker hardcodes a single `IngestionStrategy` instance (currently
    `dedupAnalyses` so the merged result is always well-formed. A clone
    failure or Mongo write failure throws and propagates to BullMQ for
    retry under the queue's `attempts: 3`.
-6. **Hardcoded filters only.** No LLM-based ignore decisions in v0. The
+7. **Hardcoded filters only.** No LLM-based ignore decisions in v0. The
    directory / file / extension blocklists in `scan.ts` are the only
    way files get skipped.
 
@@ -135,7 +205,6 @@ worker hardcodes a single `IngestionStrategy` instance (currently
 - GitHub API streaming mode (always shell-clone)
 - Default-branch auto-detection (caller supplies `branch`; defaults to
   `"main"`)
-- Concurrency control / parallel file processing
 - Folder-level summaries / `repoSummary.json` / `flat-folder` strategy
 - Semantic chunking (`SemanticChunker`)
 - Per-chunk persistence (we persist only the merged file-level
