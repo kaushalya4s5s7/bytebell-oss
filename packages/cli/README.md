@@ -36,16 +36,30 @@ indexing, configuration, server lifecycle, and inspection.
   matching `bytebell set …` hint). Auto-fills blank infra config keys
   with local-docker defaults (mongo / neo4j / neo4j-user / redis) and
   generates a random Neo4j password if one isn't already set. Writes
-  `infra/docker/.env`, runs `docker compose -f
+  `infra/docker/.env` (Neo4j password + host ports derived from the
+  configured URIs), runs `docker compose -f
 infra/docker/docker-compose.yml up -d`, polls
   `docker compose ps --format json` until all three services report
   `healthy`, then invokes `ensureServerRunning()` (existing helper) to
   spawn `bytebell-server`. Idempotent — re-running on an already-up
-  stack is a fast no-op.
+  stack is a fast no-op. When a compose host port is already taken,
+  boot drops into an Ink picker (`PortConflictSelector.tsx`) offering
+  three choices: reuse the existing service on that port (compose
+  starts only the unconflicted services), stop the conflicting
+  container and reuse the port, or change bytebell's host port for
+  the affected service (mongo / neo4j-bolt / redis URI gets rewritten
+  via `setConfigValue`, compose env is regenerated, retry). Up to
+  four conflict rounds before giving up.
 - `bytebell shutdown` — sends SIGTERM to the server PID, polls until
-  the PID file vanishes (≤ 30 s), and prints the `docker compose down`
-  hint. Docker infra is **left running** by design — warm re-boots are
-  fast.
+  the PID file vanishes (≤ 30 s), then asks (Ink prompt
+  `StopInfraPrompt.tsx`) whether to stop Docker infra too. Default
+  answer is **Yes** (Enter tears down `mongo + neo4j + redis` via
+  `docker compose down --remove-orphans`); pressing `n` / Esc keeps the
+  containers running for fast warm re-boots and prints the manual
+  `docker compose down` hint. The prompt is skipped when stdin isn't a
+  TTY (CI-safe — falls back to keeping infra up). Two flags override
+  the prompt deterministically: `--with-docker` always stops infra,
+  `--keep-docker` always leaves it running; passing both is rejected.
 - `bytebell server start` — low-level wrapper that spawns the server
   in the foreground (Ctrl+C to stop). Used during dev; everyday users
   prefer `bytebell boot`.
