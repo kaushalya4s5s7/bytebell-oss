@@ -33,10 +33,12 @@ export interface IGraphFileRepository {
   upsertFileNode(input: UpsertFileNodeInput): Promise<void>;
   deleteFileNodes(knowledgeId: string, paths: string[]): Promise<void>;
   snapshotFilesToVersion(input: SnapshotFilesInput): Promise<void>;
+  upsertFileNodesBatch(inputs: readonly UpsertFileNodeInput[]): Promise<void>;
 }
 
 export interface IGraphFolderRepository {
   upsertFolderNode(input: UpsertFolderNodeInput): Promise<void>;
+  upsertFolderNodesBatch(inputs: readonly UpsertFolderNodeInput[]): Promise<void>;
 }
 
 export interface IGraphRepoRepository {

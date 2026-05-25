@@ -49,10 +49,12 @@ export const filesGraph: IGraphFileRepository = {
   upsertFileNode: (...args) => getGraph().files.upsertFileNode(...args),
   deleteFileNodes: (...args) => getGraph().files.deleteFileNodes(...args),
   snapshotFilesToVersion: (...args) => getGraph().files.snapshotFilesToVersion(...args),
+  upsertFileNodesBatch: (...args) => getGraph().files.upsertFileNodesBatch(...args),
 };
 
 export const foldersGraph: IGraphFolderRepository = {
   upsertFolderNode: (...args) => getGraph().folders.upsertFolderNode(...args),
+  upsertFolderNodesBatch: (...args) => getGraph().folders.upsertFolderNodesBatch(...args),
 };
 
 export const repoGraph: IGraphRepoRepository = {

@@ -1,8 +1,9 @@
 import { Config, KnowledgeState, type GithubPullPayload, type JobMessage } from "@bb/types";
+import type { NodeScope } from "@bb/types";
 import { getConfigValue } from "@bb/config";
 import { withConcurrency } from "./concurrency.ts";
-import { getKnowledge, markKnowledgeFailed, setKnowledgeCommit, setKnowledgeState } from "@bb/mongo";
-import { setKnowledgeStateInGraph, snapshotFilesToVersion, type NodeScope } from "@bb/neo4j";
+import { knowledgeDb } from "@bb/db";
+import { knowledgeGraph, filesGraph } from "@bb/graph-db";
 import type { PipelineSummary } from "#src/types/pipeline.ts";
 import { resolveOrgId, llmCallContextFromPayload } from "./context.ts";
 import { IngestError, KnowledgeNotFoundError } from "@bb/errors";

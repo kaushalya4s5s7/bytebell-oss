@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { Config } from "@bb/types";
+import { Config, type UpsertFolderNodeInput, type UpsertFileNodeInput } from "@bb/types";
 import { getConfigValue } from "@bb/config";
 import { logger } from "@bb/logger";
-import { filesGraph, foldersGraph, repoGraph, indexesGraph } from "@bb/graph-db";
+import { repoGraph, indexesGraph, foldersGraph, filesGraph } from "@bb/graph-db";
 import type { GithubIndexPayload } from "@bb/types";
 import type { NodeScope } from "@bb/graph-core";
 import type { MetaPaths } from "#src/types/meta-paths.ts";
@@ -117,7 +117,7 @@ export async function storeFlatAnalysis(input: StoreFlatAnalysisInput): Promise<
     for (let i = 0; i < folderInputs.length; i += batchSize) {
       throwIfCancelled(input.scope.knowledgeId);
       const batch = folderInputs.slice(i, i + batchSize);
-      await upsertFolderNodesBatch(batch);
+      await foldersGraph.upsertFolderNodesBatch(batch);
       foldersWritten += batch.length;
       nodesWritten += batch.length;
       for (const item of batch) {
@@ -149,7 +149,7 @@ export async function storeFlatAnalysis(input: StoreFlatAnalysisInput): Promise<
     for (let i = 0; i < fileInputs.length; i += batchSize) {
       throwIfCancelled(input.scope.knowledgeId);
       const batch = fileInputs.slice(i, i + batchSize);
-      await upsertFileNodesBatch(batch);
+      await filesGraph.upsertFileNodesBatch(batch);
       filesWritten += batch.length;
       nodesWritten += batch.length;
       for (const item of batch) {
