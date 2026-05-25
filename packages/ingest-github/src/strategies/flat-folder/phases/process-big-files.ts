@@ -25,6 +25,12 @@ export interface ProcessBigFilesResult {
   tokenUsage: { inputTokens: number; outputTokens: number; costUsd: number };
 }
 
+/**
+ * Legacy big-file driver. Reads the deprecated `bigFiles.json`, processes
+ * each entry serially via `processBigFile` (which internally does
+ * chunk-then-condense). Kept for the pull-path (`pipeline/pull.ts`) and any
+ * caller that has not migrated to `analyseBigFiles(manifest, …)` yet.
+ */
 export async function processBigFilesQueue(input: ProcessBigFilesInput): Promise<ProcessBigFilesResult> {
   const entries = await readBigFiles(input.metaPaths);
   let processed = 0;
@@ -61,13 +67,13 @@ export async function processBigFilesQueue(input: ProcessBigFilesInput): Promise
         content = await input.source.readFile(entry.relativePath);
       } catch (cause: unknown) {
         failed += 1;
-        logger.warn(`phase2: read failed for ${entry.relativePath}: ${describe(cause)}`);
+        logger.warn(`big-files-queue: read failed for ${entry.relativePath}: ${describe(cause)}`);
         reporter?.increment(1, { fileName: entry.relativePath });
         continue;
       }
       if (content.length === 0) {
         failed += 1;
-        logger.warn(`phase2: empty content for ${entry.relativePath}; skipping`);
+        logger.warn(`big-files-queue: empty content for ${entry.relativePath}; skipping`);
         reporter?.increment(1, { fileName: entry.relativePath });
         continue;
       }
@@ -95,12 +101,12 @@ export async function processBigFilesQueue(input: ProcessBigFilesInput): Promise
           throw cause;
         }
         failed += 1;
-        logger.warn(`phase2: processBigFile failed for ${entry.relativePath}: ${describe(cause)}`);
+        logger.warn(`big-files-queue: processBigFile failed for ${entry.relativePath}: ${describe(cause)}`);
       }
       reporter?.increment(1, { fileName: entry.relativePath });
     }
     logger.info(
-      `phase2 done: processed=${processed} cached=${cached} failed=${failed} skippedOversized=${skippedOversized}`,
+      `big-files-queue done: processed=${processed} cached=${cached} failed=${failed} skippedOversized=${skippedOversized}`,
     );
     return {
       processed,
@@ -114,6 +120,6 @@ export async function processBigFilesQueue(input: ProcessBigFilesInput): Promise
   }
 }
 
-function describe(cause: unknown): string {
+export function describe(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
