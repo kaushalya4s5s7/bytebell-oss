@@ -1,24 +1,25 @@
-import { readFile, readdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { askJsonLLM, type AskLlmOptions } from "@bb/llm";
-import { LlmConfigError, LlmError } from "@bb/errors";
+import type { AskLlmOptions } from "@bb/llm";
 import { logger } from "@bb/logger";
-import { Config } from "@bb/types";
-import { getConfigValue } from "@bb/config";
 import type { CondensedFileAnalysis } from "#src/types/condensed-file-analysis.ts";
 import type { MetaPaths } from "#src/types/meta-paths.ts";
-import { encodeMetaPath } from "#src/pipeline/paths.ts";
-import { withConcurrency } from "#src/pipeline/concurrency.ts";
+import type { ConcurrencyLimiter } from "#src/pipeline/concurrency.ts";
 import { throwIfCancelled, CancellationError } from "#src/pipeline/cancellation.ts";
 import type { ProgressContext } from "#src/progress/types.ts";
-import { iterateCondensed } from "./big-file/storage.ts";
+import type { FileAnalysisCache } from "./file-analysis-cache.ts";
 import { directFolderOf } from "./folder-path.ts";
-import { FOLDER_ANALYSIS_SYSTEM_PROMPT, folderAnalysisUserPrompt } from "./prompts/folder-summary.ts";
-import type { FolderSummary } from "./types.ts";
+import {
+  type FolderBucket,
+  groupFoldersForBatching,
+  summariseFolder,
+  summariseFolderBatch,
+  persistFolderSummary,
+} from "./folder-summary-api.ts";
 
-export async function groupByDirectFolder(metaPaths: MetaPaths): Promise<Map<string, CondensedFileAnalysis[]>> {
+export { iterateFolderSummaries } from "./folder-summary-api.ts";
+
+export function groupByDirectFolder(cache: FileAnalysisCache): Map<string, CondensedFileAnalysis[]> {
   const groups = new Map<string, CondensedFileAnalysis[]>();
-  for await (const entry of iterateCondensed(metaPaths)) {
+  for (const entry of cache.values()) {
     const folder = directFolderOf(entry.relativePath);
     const bucket = groups.get(folder) ?? [];
     bucket.push(entry);
@@ -27,92 +28,138 @@ export async function groupByDirectFolder(metaPaths: MetaPaths): Promise<Map<str
   return groups;
 }
 
-interface FolderSummaryJson {
-  purpose?: unknown;
-  summary?: unknown;
-  keywords?: unknown;
-  classes?: unknown;
-  functions?: unknown;
-  importsInternal?: unknown;
-  importsExternal?: unknown;
-  dependencyGraph?: unknown;
+interface FolderSummaryTotals {
+  succeeded: number;
+  failed: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
 }
 
-export async function summariseFolder(
-  folderPath: string,
-  files: CondensedFileAnalysis[],
-  llmCallContext?: AskLlmOptions,
-): Promise<{
-  summary: FolderSummary | null;
-  tokenUsage: { inputTokens: number; outputTokens: number; costUsd: number };
-}> {
-  const userPrompt = folderAnalysisUserPrompt(folderPath, files);
+/**
+ * Dispatches a single folder through `summariseFolder` and persists the
+ * result. Shared between `runFolderSummaryPhase` and `runSelectiveFolderSummary`.
+ */
+async function dispatchIndividual(
+  bucket: FolderBucket,
+  metaPaths: MetaPaths,
+  totals: FolderSummaryTotals,
+  llmCallContext: AskLlmOptions | undefined,
+  reporter: ReturnType<NonNullable<ProgressContext["reporter"]>> | undefined,
+  knowledgeId: string,
+  phaseLabel: string,
+): Promise<void> {
   try {
-    const response = await askJsonLLM<FolderSummaryJson>(
-      FOLDER_ANALYSIS_SYSTEM_PROMPT,
-      userPrompt,
-      llmCallContext ?? {},
-    );
-    if (response.result === null) {
-      logger.warn(`summariseFolder: ${folderPath || "<root>"} returned unparseable JSON`);
-      return {
-        summary: null,
-        tokenUsage: {
-          inputTokens: response.usage.inputTokens,
-          outputTokens: response.usage.outputTokens,
-          costUsd: response.usage.costUsd,
-        },
-      };
+    throwIfCancelled(knowledgeId);
+    const { summary, tokenUsage } = await summariseFolder(bucket.folderPath, bucket.files, llmCallContext);
+    totals.inputTokens += tokenUsage.inputTokens;
+    totals.outputTokens += tokenUsage.outputTokens;
+    totals.costUsd += tokenUsage.costUsd;
+    if (summary !== null) {
+      await persistFolderSummary(metaPaths, summary);
+      totals.succeeded += 1;
+    } else {
+      totals.failed += 1;
     }
-    return {
-      summary: shapeFolderSummary(folderPath, response.result),
-      tokenUsage: {
-        inputTokens: response.usage.inputTokens,
-        outputTokens: response.usage.outputTokens,
-        costUsd: response.usage.costUsd,
-      },
-    };
   } catch (cause: unknown) {
-    if (cause instanceof LlmConfigError || cause instanceof LlmError) {
+    if (cause instanceof CancellationError) {
       throw cause;
     }
-    const msg = cause instanceof Error ? cause.message : String(cause);
-    logger.warn(`summariseFolder: ${folderPath || "<root>"} askJsonLLM failed: ${msg}`);
-    return { summary: null, tokenUsage: { inputTokens: 0, outputTokens: 0, costUsd: 0 } };
+    totals.failed += 1;
+    logger.warn(`${phaseLabel}: folder summary failed for ${bucket.folderPath || "<root>"}`);
+  } finally {
+    reporter?.increment(1, { fileName: bucket.folderPath || "<root>" });
   }
 }
 
-export async function persistFolderSummary(metaPaths: MetaPaths, summary: FolderSummary): Promise<void> {
-  const file = path.join(metaPaths.folderSummariesDir, `${encodeMetaPath(summary.folderPath || "__ROOT__")}.json`);
-  await writeFile(file, JSON.stringify(summary, null, 2), "utf8");
-}
-
-export async function* iterateFolderSummaries(metaPaths: MetaPaths): AsyncGenerator<FolderSummary> {
-  let entries: string[];
+/**
+ * Dispatches a multi-folder batch through `summariseFolderBatch`. Each
+ * non-null per-folder summary is persisted; missing/null entries count
+ * toward `failed`. Progress increments once per folder.
+ */
+async function dispatchBatch(
+  batch: FolderBucket[],
+  metaPaths: MetaPaths,
+  totals: FolderSummaryTotals,
+  llmCallContext: AskLlmOptions | undefined,
+  reporter: ReturnType<NonNullable<ProgressContext["reporter"]>> | undefined,
+  knowledgeId: string,
+  phaseLabel: string,
+): Promise<void> {
   try {
-    entries = await readdir(metaPaths.folderSummariesDir);
-  } catch {
-    return;
-  }
-  for (const name of entries) {
-    if (!name.endsWith(".json")) {
-      continue;
-    }
-    try {
-      const raw = await readFile(path.join(metaPaths.folderSummariesDir, name), "utf8");
-      const parsed: unknown = JSON.parse(raw);
-      if (typeof parsed === "object" && parsed !== null) {
-        yield parsed as FolderSummary;
+    throwIfCancelled(knowledgeId);
+    const { summaries, tokenUsage } = await summariseFolderBatch(batch, llmCallContext);
+    totals.inputTokens += tokenUsage.inputTokens;
+    totals.outputTokens += tokenUsage.outputTokens;
+    totals.costUsd += tokenUsage.costUsd;
+    for (const bucket of batch) {
+      const summary = summaries.get(bucket.folderPath) ?? null;
+      if (summary !== null) {
+        try {
+          await persistFolderSummary(metaPaths, summary);
+          totals.succeeded += 1;
+        } catch (cause: unknown) {
+          totals.failed += 1;
+          logger.warn(
+            `${phaseLabel}: persist failed for ${bucket.folderPath || "<root>"}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          );
+        }
+      } else {
+        totals.failed += 1;
       }
-    } catch {
-      continue;
+      reporter?.increment(1, { fileName: bucket.folderPath || "<root>" });
     }
+  } catch (cause: unknown) {
+    if (cause instanceof CancellationError) {
+      throw cause;
+    }
+    totals.failed += batch.length;
+    for (const bucket of batch) {
+      reporter?.increment(1, { fileName: bucket.folderPath || "<root>" });
+    }
+    logger.warn(
+      `${phaseLabel}: batch summary failed for ${batch.length} folders: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
   }
+}
+
+/**
+ * Dispatch helper used by both `runFolderSummaryPhase` and
+ * `runSelectiveFolderSummary`. Splits `groups` into individual + batched
+ * buckets, schedules every task through the shared `limiter`, awaits all,
+ * and returns the aggregated totals.
+ */
+export async function dispatchFolderSummaries(
+  groups: Map<string, CondensedFileAnalysis[]>,
+  metaPaths: MetaPaths,
+  limiter: ConcurrencyLimiter,
+  llmCallContext: AskLlmOptions | undefined,
+  reporter: ReturnType<NonNullable<ProgressContext["reporter"]>> | undefined,
+  knowledgeId: string,
+  phaseLabel: string,
+): Promise<FolderSummaryTotals> {
+  const totals: FolderSummaryTotals = { succeeded: 0, failed: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  const { individual, batches } = groupFoldersForBatching(groups);
+  const tasks: Promise<void>[] = [];
+  for (const bucket of individual) {
+    tasks.push(
+      limiter(() => dispatchIndividual(bucket, metaPaths, totals, llmCallContext, reporter, knowledgeId, phaseLabel)),
+    );
+  }
+  for (const batch of batches) {
+    tasks.push(
+      limiter(() => dispatchBatch(batch, metaPaths, totals, llmCallContext, reporter, knowledgeId, phaseLabel)),
+    );
+  }
+  await Promise.all(tasks);
+  return totals;
 }
 
 export async function runFolderSummaryPhase(
   knowledgeId: string,
   metaPaths: MetaPaths,
+  cache: FileAnalysisCache,
+  limiter: ConcurrencyLimiter,
   llmCallContext?: AskLlmOptions,
   progressContext?: ProgressContext,
 ): Promise<{
@@ -120,88 +167,22 @@ export async function runFolderSummaryPhase(
   failed: number;
   tokenUsage: { inputTokens: number; outputTokens: number; costUsd: number };
 }> {
-  const concurrentWorkers = getConfigValue(Config.ConcurrentWorkers);
-  const limit = withConcurrency(concurrentWorkers);
-  const groups = await groupByDirectFolder(metaPaths);
-  let succeeded = 0;
-  let failed = 0;
-  let totalInputTokens = 0;
-  let totalOutputTokens = 0;
-  let totalCostUsd = 0;
+  const groups = groupByDirectFolder(cache);
   const reporter = progressContext?.reporter({
     phase: "folder_analysis",
     total: { kind: "fixed", total: groups.size },
   });
   await reporter?.start();
+  let totals: FolderSummaryTotals;
   try {
-    const tasks: Promise<void>[] = [];
-    for (const [folderPath, files] of groups.entries()) {
-      tasks.push(
-        limit(async () => {
-          try {
-            throwIfCancelled(knowledgeId);
-            const { summary, tokenUsage } = await summariseFolder(folderPath, files, llmCallContext);
-            totalInputTokens += tokenUsage.inputTokens;
-            totalOutputTokens += tokenUsage.outputTokens;
-            totalCostUsd += tokenUsage.costUsd;
-            if (summary !== null) {
-              await persistFolderSummary(metaPaths, summary);
-              succeeded += 1;
-            } else {
-              failed += 1;
-            }
-          } catch (cause: unknown) {
-            if (cause instanceof CancellationError) {
-              throw cause;
-            }
-            failed += 1;
-            logger.warn(`phase5: folder summary failed for ${folderPath || "<root>"}`);
-          } finally {
-            reporter?.increment(1, { fileName: folderPath || "<root>" });
-          }
-        }),
-      );
-    }
-    await Promise.all(tasks);
+    totals = await dispatchFolderSummaries(groups, metaPaths, limiter, llmCallContext, reporter, knowledgeId, "phase5");
   } finally {
     reporter?.stop();
   }
-  logger.info(`phase5 done: foldersSummarised=${succeeded} failed=${failed}`);
+  logger.info(`phase5 done: foldersSummarised=${totals.succeeded} failed=${totals.failed}`);
   return {
-    succeeded,
-    failed,
-    tokenUsage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens, costUsd: totalCostUsd },
+    succeeded: totals.succeeded,
+    failed: totals.failed,
+    tokenUsage: { inputTokens: totals.inputTokens, outputTokens: totals.outputTokens, costUsd: totals.costUsd },
   };
-}
-
-function shapeFolderSummary(folderPath: string, raw: FolderSummaryJson): FolderSummary {
-  return {
-    folderPath,
-    purpose: pickString(raw.purpose, ""),
-    summary: pickString(raw.summary, ""),
-    keywords: pickStringArray(raw.keywords),
-    classes: pickStringArray(raw.classes),
-    functions: pickStringArray(raw.functions),
-    importsInternal: pickStringArray(raw.importsInternal),
-    importsExternal: pickStringArray(raw.importsExternal),
-    dependencyGraph: pickString(raw.dependencyGraph, ""),
-    generatedAt: new Date().toISOString(),
-  };
-}
-
-function pickString(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.length > 0 ? value : fallback;
-}
-
-function pickStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const out: string[] = [];
-  for (const item of value) {
-    if (typeof item === "string" && item.length > 0) {
-      out.push(item);
-    }
-  }
-  return out;
 }

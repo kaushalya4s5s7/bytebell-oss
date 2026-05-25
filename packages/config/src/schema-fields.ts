@@ -53,6 +53,14 @@ export function readField<K extends Config>(cfg: BytebellConfig, key: K): Config
       return cfg["absolute.file.size.cap"] as ConfigValue<K>;
     case Config.ConcurrentWorkers:
       return cfg["concurrent.workers"] as ConfigValue<K>;
+    case Config.LlmConcurrency:
+      return cfg["llm.concurrency"] as ConfigValue<K>;
+    case Config.FolderSummaryBatchSize:
+      return cfg["folder.summary.batch.size"] as ConfigValue<K>;
+    case Config.FolderSummaryBatchMaxFiles:
+      return cfg["folder.summary.batch.max.files"] as ConfigValue<K>;
+    case Config.Neo4jBatchSize:
+      return cfg["neo4j.batch.size"] as ConfigValue<K>;
     case Config.CondenseContextLimit:
       return cfg["condense.context.limit"] as ConfigValue<K>;
     case Config.CondensePromptOverhead:
@@ -77,6 +85,8 @@ export function readField<K extends Config>(cfg: BytebellConfig, key: K): Config
       return cfg.sqlite_path as ConfigValue<K>;
     case Config.LadybugPath:
       return cfg.ladybug_path as ConfigValue<K>;
+    default:
+      throw new Error(`Unknown config key: ${key}`);
   }
 }
 
@@ -130,6 +140,14 @@ export function writeField<K extends Config>(cfg: BytebellConfig, key: K, value:
       return { ...cfg, "absolute.file.size.cap": value as number };
     case Config.ConcurrentWorkers:
       return { ...cfg, "concurrent.workers": value as number };
+    case Config.LlmConcurrency:
+      return { ...cfg, "llm.concurrency": value as number };
+    case Config.FolderSummaryBatchSize:
+      return { ...cfg, "folder.summary.batch.size": value as number };
+    case Config.FolderSummaryBatchMaxFiles:
+      return { ...cfg, "folder.summary.batch.max.files": value as number };
+    case Config.Neo4jBatchSize:
+      return { ...cfg, "neo4j.batch.size": value as number };
     case Config.CondenseContextLimit:
       return { ...cfg, "condense.context.limit": value as number };
     case Config.CondensePromptOverhead:
@@ -154,5 +172,7 @@ export function writeField<K extends Config>(cfg: BytebellConfig, key: K, value:
       return { ...cfg, sqlite_path: value as string };
     case Config.LadybugPath:
       return { ...cfg, ladybug_path: value as string };
+    default:
+      throw new Error(`Unknown config key: ${key}`);
   }
 }

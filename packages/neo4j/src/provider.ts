@@ -22,10 +22,12 @@ class Neo4jGraphProvider implements IGraphDatabaseProvider {
     upsertFileNode: filesRepo.upsertFileNode,
     deleteFileNodes: filesRepo.deleteFileNodes,
     snapshotFilesToVersion: fileVersionsRepo.snapshotFilesToVersion,
+    upsertFileNodesBatch: filesRepo.upsertFileNodesBatch,
   };
 
   folders = {
     upsertFolderNode: folderRepo.upsertFolderNode,
+    upsertFolderNodesBatch: folderRepo.upsertFolderNodesBatch,
   };
 
   repo = {

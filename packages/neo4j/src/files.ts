@@ -1,6 +1,23 @@
 import type { FileAnalysis } from "@bb/mongo";
 import { _runCypher } from "./client.ts";
 
+export { upsertFileNodesBatch } from "./files-batch.ts";
+
+export interface UpsertFileNodeInput {
+  orgId?: string;
+  knowledgeId: string;
+  repoId?: string;
+  relativePath: string;
+  language: string;
+  sha: string;
+  sizeBytes: number;
+  analysis: FileAnalysis;
+  folderPath?: string;
+  isBigFile?: boolean;
+  totalChunks?: number;
+  totalTokenCount?: number;
+}
+
 const UPSERT_FILE = `
 MERGE (f:File {knowledgeId: $knowledgeId, relativePath: $relativePath})
 SET f.orgId = $orgId,
@@ -96,21 +113,6 @@ UNWIND $names AS name
 MERGE (m:Module {name: name})
 MERGE (f)-[:HAS_IMPORT_EXTERNAL]->(m)
 `;
-
-export interface UpsertFileNodeInput {
-  orgId?: string;
-  knowledgeId: string;
-  repoId?: string;
-  relativePath: string;
-  language: string;
-  sha: string;
-  sizeBytes: number;
-  analysis: FileAnalysis;
-  folderPath?: string;
-  isBigFile?: boolean;
-  totalChunks?: number;
-  totalTokenCount?: number;
-}
 
 const DELETE_FILES = `
 MATCH (f:File {knowledgeId: $knowledgeId})

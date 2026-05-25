@@ -1,7 +1,9 @@
-import { KnowledgeState, type GithubPullPayload, type JobMessage } from "@bb/types";
-import type { NodeScope } from "@bb/graph-core";
+import { Config, KnowledgeState, type GithubPullPayload, type JobMessage } from "@bb/types";
+import type { NodeScope } from "@bb/types";
+import { getConfigValue } from "@bb/config";
+import { withConcurrency } from "./concurrency.ts";
 import { knowledgeDb } from "@bb/db";
-import { filesGraph, knowledgeGraph } from "@bb/graph-db";
+import { knowledgeGraph, filesGraph } from "@bb/graph-db";
 import type { PipelineSummary } from "#src/types/pipeline.ts";
 import { resolveOrgId, llmCallContextFromPayload } from "./context.ts";
 import { IngestError, KnowledgeNotFoundError } from "@bb/errors";
@@ -21,7 +23,7 @@ import { nullProgressContextFactory } from "#src/progress/NullProgressReporter.t
 import { analyseChangedFiles } from "#src/strategies/flat-folder/analyse-changed.ts";
 import { processBigFilesQueue } from "#src/strategies/flat-folder/phases/process-big-files.ts";
 import { backfillMissingFields } from "#src/strategies/flat-folder/backfill/fields.ts";
-import { backfillBigFiles } from "#src/strategies/flat-folder/backfill/big-files.ts";
+import { FileAnalysisCache } from "#src/strategies/flat-folder/file-analysis-cache.ts";
 import { runSelectiveFolderSummary } from "#src/strategies/flat-folder/folder-summary-selective.ts";
 import {
   makeRepoSummaryEnvelope,
@@ -194,22 +196,14 @@ export async function runPull(
     totalOutputTokens += phase2.tokenUsage.outputTokens;
     totalCostUsd += phase2.tokenUsage.costUsd;
 
+    logger.info(`pull: loading file-analysis cache`);
+    throwIfCancelled(knowledgeId);
+    const fileAnalysisCache = await FileAnalysisCache.loadAll(metaPaths);
+    const limiter = withConcurrency(getConfigValue(Config.LlmConcurrency));
+
     logger.info(`pull: phase backfill fields starting`);
     throwIfCancelled(knowledgeId);
-    await backfillMissingFields(metaPaths, llmCallContext, progressContext);
-
-    logger.info(`pull: phase backfill big-files starting`);
-    throwIfCancelled(knowledgeId);
-    const backfillBigFilesInput: Parameters<typeof backfillBigFiles>[0] = {
-      knowledgeId,
-      source,
-      metaPaths,
-      progressContext,
-    };
-    if (llmCallContext !== undefined) {
-      backfillBigFilesInput.llmCallContext = llmCallContext;
-    }
-    await backfillBigFiles(backfillBigFilesInput);
+    await backfillMissingFields(metaPaths, fileAnalysisCache, limiter, llmCallContext, progressContext);
 
     progressContext.phaseChanged("folder_analysis");
     logger.info(`pull: phase selective folder summary (${affectedFolders.size} folders) starting`);
@@ -217,6 +211,8 @@ export async function runPull(
     const selectiveInput: Parameters<typeof runSelectiveFolderSummary>[0] = {
       knowledgeId,
       metaPaths,
+      cache: fileAnalysisCache,
+      limiter,
       affectedFolders,
     };
     if (llmCallContext !== undefined) {

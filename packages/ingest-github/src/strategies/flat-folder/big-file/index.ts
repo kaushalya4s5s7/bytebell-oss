@@ -74,7 +74,7 @@ export async function processBigFile(input: ProcessBigFileInput): Promise<Conden
   }
 
   throwIfCancelled(input.knowledgeId);
-  const merged = await condenseChunks(input.relativePath, results);
+  const merged = await condenseChunks(input.relativePath, results, input.llmCallContext);
 
   const chunkPaths = chunks.map((_, i) => `chunks/${encodeFolder(input.relativePath)}/chunk-${i}.json`);
   const totalTokenCount = chunks.reduce((acc, c) => acc + c.tokenCount, 0);
