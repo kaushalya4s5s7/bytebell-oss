@@ -14,8 +14,10 @@ Defines the contract that every graph database backend (Neo4j, etc.) must implem
 - `IGraphFolderRepository` — folder node upsert
 - `IGraphRepoRepository` — repo node upsert
 - `IGraphIndexRepository` — index creation
+- `IGraphSearchRepository` — read-side queries used by MCP (smart-search channels, keyword lookup, knowledge listing, file metadata, repo-name hydration). Lets MCP stay provider-agnostic — each backend owns its own query dialect.
 - `GraphPingResult` — health probe result shape
 - Input types: `NodeScope`, `UpsertFileNodeInput`, `UpsertFolderNodeInput`, `UpsertRepoNodeInput`, `SnapshotFilesInput`, and summary payload types
+- Search types: `SmartSearchChannel`, `SmartSearchChannelInput`, `ScoredHit`, `KeywordLookupInput`, `KeywordLookupMatch`, `KeywordLookupRow`, `KnowledgeListRow`, `FileMetadataRow`, `RepoNameRow`
 
 ## Data Ownership
 

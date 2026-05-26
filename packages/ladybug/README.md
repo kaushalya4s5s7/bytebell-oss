@@ -19,6 +19,7 @@ The package owns:
 - Folder and Repository CRUD (`upsertFolderNode`, `upsertRepoNode`).
 - Optimized File-node Bulk Upsert (`bulkUpsertFiles`) — maps files to Parquet rows, writes them to temporary files on disk, and executes single-transaction `DELETE` and SQL `COPY FROM` commands.
 - File-node Snapshotting (`snapshotFilesToVersion`) — copies live files to snapshots before updates.
+- Stubbed read-side search (`src/search.ts`) — `IGraphSearchRepository` methods are declared but throw `"Ladybug search not implemented yet"`. The interface keeps types honest under a Ladybug-only deployment; real implementations (LadybugDB-native column lookups) land in a follow-up PR. Until then, MCP smart_search / keyword_lookup / list_knowledge / retrieve_file(metadata) will fail loudly rather than return wrong results when the active graph provider is Ladybug.
 
 ## Public exports
 

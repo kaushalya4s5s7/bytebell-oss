@@ -5,6 +5,7 @@ import type {
   IGraphFolderRepository,
   IGraphRepoRepository,
   IGraphIndexRepository,
+  IGraphSearchRepository,
   GraphPingResult,
 } from "@bb/graph-core";
 
@@ -91,6 +92,14 @@ export const repoGraph: IGraphRepoRepository = {
 export const indexesGraph: IGraphIndexRepository = {
   ensureKnowledgeIndexes: (...args) => getGraph().indexes.ensureKnowledgeIndexes(...args),
   ensureFlatFolderIndexes: (...args) => getGraph().indexes.ensureFlatFolderIndexes(...args),
+};
+
+export const searchGraph: IGraphSearchRepository = {
+  runSmartSearchChannel: (...args) => getGraph().search.runSmartSearchChannel(...args),
+  keywordLookup: (...args) => getGraph().search.keywordLookup(...args),
+  listKnowledgeBases: (...args) => getGraph().search.listKnowledgeBases(...args),
+  fetchFileMetadata: (...args) => getGraph().search.fetchFileMetadata(...args),
+  fetchRepoNames: (...args) => getGraph().search.fetchRepoNames(...args),
 };
 
 export async function pingGraph(): Promise<GraphPingResult> {
