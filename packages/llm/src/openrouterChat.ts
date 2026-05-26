@@ -1,0 +1,160 @@
+import { getConfigValue } from "@bb/config";
+import { Config } from "@bb/types";
+import { LlmError } from "@bb/errors";
+import { tokenLen } from "./tokenizer.ts";
+import type { AskLlmOptions, AskLlmUsage } from "./client.ts";
+
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lower-level OpenRouter chat — accepts arbitrary `messages[]` (including
+// `assistant` and `tool` roles) and an optional `tools[]` list. Returns the
+// raw assistant message so callers can dispatch on `tool_calls`. Used by
+// `callOpenRouter` (single-shot wrapper preserving today's signature) and by
+// the tool-use loop in `toolLoop.ts`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface OpenRouterToolDef {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface OpenRouterToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export type OpenRouterRole = "system" | "user" | "assistant" | "tool";
+
+export interface OpenRouterMessageInput {
+  role: OpenRouterRole;
+  content: string | null;
+  /** Set on `assistant` messages when the prior turn produced tool calls. */
+  tool_calls?: OpenRouterToolCall[];
+  /** Required on `tool` messages — the id of the tool_call this responds to. */
+  tool_call_id?: string;
+  /** Optional name on `tool` messages — the tool that produced the result. */
+  name?: string;
+}
+
+interface OpenRouterUsageAccounting {
+  include: true;
+}
+
+interface OpenRouterProviderRouting {
+  allow_fallbacks: boolean;
+}
+
+interface OpenRouterRequest {
+  model: string;
+  models?: string[];
+  messages: OpenRouterMessageInput[];
+  tools?: OpenRouterToolDef[];
+  usage: OpenRouterUsageAccounting;
+  provider: OpenRouterProviderRouting;
+}
+
+interface OpenRouterResponseMessage {
+  role: "assistant";
+  content: string | null;
+  tool_calls?: OpenRouterToolCall[];
+}
+
+interface OpenRouterResponse {
+  model?: string;
+  choices?: Array<{ message?: OpenRouterResponseMessage; finish_reason?: string }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+}
+
+export interface OpenRouterChatResult {
+  message: OpenRouterResponseMessage;
+  usage: AskLlmUsage;
+  finishReason: string | null;
+}
+
+export async function openRouterRawChat(
+  messages: OpenRouterMessageInput[],
+  modelChain: string[],
+  opts: AskLlmOptions,
+  timeoutMs: number,
+  tools?: OpenRouterToolDef[],
+): Promise<OpenRouterChatResult> {
+  const apiKey = opts.apiKey ?? getConfigValue(Config.OpenrouterApiKey);
+  const model = modelChain[0] ?? opts.model ?? getConfigValue(Config.OpenrouterModel);
+
+  const body: OpenRouterRequest = {
+    model,
+    messages,
+    usage: { include: true },
+    provider: { allow_fallbacks: false },
+  };
+  if (modelChain.length > 1) {
+    body.models = modelChain;
+  }
+  if (tools !== undefined && tools.length > 0) {
+    body.tools = tools;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response: Response;
+  try {
+    response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (cause: unknown) {
+    if (cause instanceof Error && cause.name === "AbortError") {
+      throw new LlmError(`OpenRouter request timed out after ${timeoutMs}ms`, cause);
+    }
+    throw new LlmError("OpenRouter request failed", cause);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new LlmError(`OpenRouter HTTP ${response.status}`, undefined, {
+      status: response.status,
+      detail: text.slice(0, 4000),
+    });
+  }
+
+  const json = (await response.json()) as OpenRouterResponse;
+  const message = json.choices?.[0]?.message;
+  if (message === undefined) {
+    throw new LlmError("OpenRouter returned no message");
+  }
+  const promptText = serialiseMessagesForTokenEstimate(messages);
+  return {
+    message,
+    finishReason: json.choices?.[0]?.finish_reason ?? null,
+    usage: {
+      model: typeof json.model === "string" && json.model.length > 0 ? json.model : model,
+      inputTokens: typeof json.usage?.prompt_tokens === "number" ? json.usage.prompt_tokens : tokenLen(promptText),
+      outputTokens:
+        typeof json.usage?.completion_tokens === "number"
+          ? json.usage.completion_tokens
+          : tokenLen(message.content ?? ""),
+      costUsd: typeof json.usage?.cost === "number" ? json.usage.cost : 0,
+    },
+  };
+}
+
+function serialiseMessagesForTokenEstimate(messages: OpenRouterMessageInput[]): string {
+  return messages
+    .map((m) => (typeof m.content === "string" ? m.content : ""))
+    .filter((s) => s.length > 0)
+    .join("\n");
+}
