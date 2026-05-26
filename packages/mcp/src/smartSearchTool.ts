@@ -12,6 +12,7 @@ import {
 } from "./smartSearchChannels.ts";
 import {
   attachRepoNames,
+  buildConceptClusters,
   clusterByFolder,
   fuseHits,
   type FusedResult,
@@ -50,6 +51,10 @@ PARAMS:
 const schema = {
   query: z.string().min(1).describe("Search term"),
   knowledgeId: z.string().optional().describe("Scope to a single repo. Omit for cross-repo search."),
+  knowledgeIds: z
+    .array(z.string())
+    .optional()
+    .describe("Scope to this allowlist of repos. Intersects with knowledgeId when both set."),
   path: z.string().optional().describe("Scope to files under this path prefix (e.g. 'src/auth')."),
   exclude: z
     .array(z.enum(EXCLUSION_CATEGORIES))
@@ -68,6 +73,7 @@ const schema = {
 interface SmartSearchInput {
   query: string;
   knowledgeId?: string | undefined;
+  knowledgeIds?: string[] | undefined;
   path?: string | undefined;
   exclude?: ExclusionCategory[] | undefined;
   page?: number | undefined;
@@ -98,6 +104,7 @@ async function runSmartSearch(args: SmartSearchInput): Promise<SmartSearchResult
   const exclusions = buildExclusionParams(args.exclude ?? []);
   const params: SearchParams = {
     knowledgeId: args.knowledgeId ?? null,
+    knowledgeIds: args.knowledgeIds !== undefined && args.knowledgeIds.length > 0 ? args.knowledgeIds : null,
     pathPrefix: args.path ?? null,
     queryTerms: queryTerms.length === 0 ? [args.query.trim().toLowerCase()] : queryTerms,
     fulltextQuery: buildFulltextQuery(queryTerms.length === 0 ? [args.query.trim().toLowerCase()] : queryTerms),
@@ -153,8 +160,9 @@ async function runSmartSearch(args: SmartSearchInput): Promise<SmartSearchResult
   const pageResults = sortedResults.slice(start, start + pageSize);
   const reposMatched = uniqueRepoNames(pageResults);
   const clusters = clusterByFolder(pageResults);
+  const conceptClusters = await buildConceptClusters(pageResults);
 
-  return {
+  const result: SmartSearchResult = {
     query: args.query,
     channels_used: channelsUsed,
     total_matches: sortedResults.length,
@@ -162,6 +170,10 @@ async function runSmartSearch(args: SmartSearchInput): Promise<SmartSearchResult
     top_results: pageResults,
     clusters,
   };
+  if (conceptClusters.length > 0) {
+    result.concept_clusters = conceptClusters;
+  }
+  return result;
 }
 
 function uniqueRepoNames(results: FusedResult[]): string[] {

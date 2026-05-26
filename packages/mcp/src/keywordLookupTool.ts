@@ -32,6 +32,10 @@ const schema = {
     .optional()
     .describe(`Entity to look up. Options: ${MATCH_MODES.join(", ")}. Default: keyword`),
   knowledgeId: z.string().optional().describe("Scope to a single repo. Omit for cross-repo."),
+  knowledgeIds: z
+    .array(z.string())
+    .optional()
+    .describe("Scope to this allowlist of repos. Intersects with knowledgeId when both set."),
   keywordLimit: z
     .number()
     .int()
@@ -53,6 +57,7 @@ interface KeywordLookupInput {
   term: string;
   match?: MatchMode | undefined;
   knowledgeId?: string | undefined;
+  knowledgeIds?: string[] | undefined;
   keywordLimit?: number | undefined;
   filesPerKeyword?: number | undefined;
   page?: number | undefined;
@@ -120,6 +125,7 @@ async function runKeywordLookup(args: KeywordLookupInput): Promise<KeywordLookup
     match,
     term: args.term,
     knowledgeId: args.knowledgeId ?? null,
+    knowledgeIds: args.knowledgeIds !== undefined && args.knowledgeIds.length > 0 ? args.knowledgeIds : null,
     keywordLimit,
     filesPerKeyword,
   });
@@ -131,7 +137,7 @@ async function runKeywordLookup(args: KeywordLookupInput): Promise<KeywordLookup
   return {
     query: args.term,
     match,
-    cross_repo: args.knowledgeId === undefined,
+    cross_repo: args.knowledgeId === undefined && (args.knowledgeIds === undefined || args.knowledgeIds.length === 0),
     total_matched: totalMatched,
     matched: pageEntries,
     pagination: {
@@ -150,6 +156,7 @@ interface MatchQueryArgs {
   match: MatchMode;
   term: string;
   knowledgeId: string | null;
+  knowledgeIds: string[] | null;
   keywordLimit: number;
   filesPerKeyword: number;
 }
@@ -159,6 +166,7 @@ async function runMatchQuery(args: MatchQueryArgs): Promise<RowShape[]> {
   const cypher = cypherForMatch(args.match);
   const params: Record<string, unknown> = {
     knowledgeId: args.knowledgeId,
+    knowledgeIds: args.knowledgeIds,
     keywordLimit: toNeo4jInt(args.keywordLimit),
     filesPerKeyword: toNeo4jInt(args.filesPerKeyword),
   };
@@ -177,6 +185,7 @@ function cypherForMatch(match: MatchMode): string {
       WITH kw, score ORDER BY score DESC LIMIT $keywordLimit
       MATCH (f:File)-[:HAS_KEYWORD]->(kw)
       WHERE ($knowledgeId IS NULL OR f.knowledgeId = $knowledgeId)
+        AND ($knowledgeIds IS NULL OR f.knowledgeId IN $knowledgeIds)
       MATCH (k:Knowledge {knowledgeId: f.knowledgeId})
       WITH kw, f, k LIMIT $keywordLimit * $filesPerKeyword
       RETURN kw.name AS name,
@@ -193,6 +202,7 @@ function cypherForMatch(match: MatchMode): string {
       WITH m ORDER BY m.name LIMIT $keywordLimit
       MATCH (f:File)-[:HAS_IMPORT_INTERNAL|HAS_IMPORT_EXTERNAL]->(m)
       WHERE ($knowledgeId IS NULL OR f.knowledgeId = $knowledgeId)
+        AND ($knowledgeIds IS NULL OR f.knowledgeId IN $knowledgeIds)
       MATCH (k:Knowledge {knowledgeId: f.knowledgeId})
       WITH m, f, k LIMIT $keywordLimit * $filesPerKeyword
       RETURN m.name AS name,
