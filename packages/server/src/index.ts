@@ -10,8 +10,8 @@ import { connectQueue } from "@bb/queue";
 import "@bb/mongo";
 import "@bb/sqlite";
 import "@bb/neo4j";
-import "@bb/ladybug";
 import "@bb/queue-bullmq";
+import "@bb/queue-honker";
 
 import { registerGithubWorkers, registerLocalIngestWorker } from "@bb/ingest-github";
 import { ServerConfigError } from "@bb/errors";

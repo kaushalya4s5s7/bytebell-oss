@@ -63,13 +63,13 @@
       "path": "packages/queue-bullmq"
     },
     {
+      "path": "packages/queue-honker"
+    },
+    {
       "path": "packages/db"
     },
     {
       "path": "packages/graph-db"
     }
-    // {
-    //   "path": "packages/ladybug"
-    // }
   ]
 }

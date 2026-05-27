@@ -56,6 +56,7 @@ export const configSchema = z
     db_provider: z.string().default("mongo"),
     graph_provider: z.string().default("neo4j"),
     queue_provider: z.string().default("bullmq"),
+    queue_db_path: z.string().default(""),
     sqlite_path: z.string().default(""),
   })
   .strict();
@@ -104,6 +105,7 @@ export type ConfigValueMap = {
   [Config.DbProvider]: string;
   [Config.GraphProvider]: string;
   [Config.QueueProvider]: string;
+  [Config.QueueDbPath]: string;
   [Config.SqlitePath]: string;
 };
 
@@ -166,6 +168,7 @@ export const HINTS: Readonly<Record<Config, string>> = {
   [Config.DbProvider]: "bytebell set db-provider <mongo|...>",
   [Config.GraphProvider]: "bytebell set graph-provider <neo4j|...>",
   [Config.QueueProvider]: "bytebell set queue-provider <bullmq|honker>",
+  [Config.QueueDbPath]: "bytebell set queue-db-path <path>",
   [Config.SqlitePath]: "bytebell set sqlite-path <path>",
 };
 

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only WITH non-commercial-clause
+import path from "node:path";
+import { homedir } from "node:os";
 import { Command } from "commander";
-import { Config } from "@bb/types";
-import { HINTS, getConfigValue, isDevMode } from "@bb/config";
+import { Config, QueueProviderType } from "@bb/types";
+import { HINTS, getBytebellHome, getConfigValue, isDevMode } from "@bb/config";
 import { applyInfraDefaults, checkPreflight } from "./bootConfig.ts";
 import {
   DockerComposeError,
@@ -30,8 +32,26 @@ const MAX_CONFLICT_ROUNDS = 4;
 
 export function buildBootCommand(): Command {
   const cmd = new Command("boot");
-  cmd.description("Bring up Docker infra (mongo + neo4j + redis) and start the bytebell-server.").action(runBoot);
+  cmd
+    .description(
+      "Bring up Docker infra (mongo + neo4j + redis/honker per queue-provider) and start the bytebell-server.",
+    )
+    .action(runBoot);
   return cmd;
+}
+
+function usingHonker(): boolean {
+  return getConfigValue(Config.QueueProvider) === QueueProviderType.Honker;
+}
+
+function expandTilde(p: string): string {
+  if (p === "~") {
+    return homedir();
+  }
+  if (p.startsWith("~/")) {
+    return path.join(homedir(), p.slice(2));
+  }
+  return p;
 }
 
 async function runBoot(): Promise<void> {
@@ -65,7 +85,13 @@ async function runBoot(): Promise<void> {
   }
   success(`mongo  → ${upResult.services.mongo}`);
   success(`neo4j  → ${upResult.services.neo4j}`);
-  success(`redis  → ${upResult.services.redis}`);
+  if (usingHonker()) {
+    const queueDbPath = getConfigValue(Config.QueueDbPath);
+    const resolved = queueDbPath.length > 0 ? expandTilde(queueDbPath) : path.join(getBytebellHome(), "queue.db");
+    success(`queue  → honker (sqlite: ${resolved})`);
+  } else {
+    success(`redis  → ${upResult.services.redis}`);
+  }
 
   if (!(await startServer())) {
     return;
@@ -78,6 +104,9 @@ async function runBoot(): Promise<void> {
 
 async function bringInfraUp(neo4jPassword: string): Promise<UpResult | null> {
   const skipServices = new Set<"mongo" | "neo4j" | "redis">();
+  if (usingHonker()) {
+    skipServices.add("redis");
+  }
   for (let round = 0; round < MAX_CONFLICT_ROUNDS; round += 1) {
     const ports = readInfraPorts();
     const watched = composeServicesToStart(skipServices);
