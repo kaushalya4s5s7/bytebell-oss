@@ -1,0 +1,336 @@
+// SPDX-License-Identifier: AGPL-3.0-only WITH non-commercial-clause
+import { useState } from "react";
+import type { ReactElement } from "react";
+import { Box, Text, useApp, useInput } from "ink";
+import { Field } from "./Field.tsx";
+
+export type LlmProviderChoice = "openrouter" | "ollama";
+
+export interface InstallWizardResult {
+  provider: LlmProviderChoice;
+  openrouterApiKey?: string;
+  openrouterModel?: string;
+  ollamaUrl?: string;
+  ollamaModel?: string;
+  indexUrl?: string;
+}
+
+type Stage = "provider" | "fields" | "repo" | "confirm";
+
+interface ProviderItem {
+  value: LlmProviderChoice;
+  label: string;
+  hint: string;
+}
+
+const PROVIDERS: ProviderItem[] = [
+  { value: "openrouter", label: "OpenRouter", hint: "API key required — https://openrouter.ai" },
+  { value: "ollama", label: "Ollama", hint: "local, free — must already be running" },
+];
+
+export interface InstallWizardProps {
+  onDone: (result: InstallWizardResult) => void;
+}
+
+export function InstallWizard({ onDone }: InstallWizardProps): ReactElement {
+  const { exit } = useApp();
+  const [stage, setStage] = useState<Stage>("provider");
+  const [providerIdx, setProviderIdx] = useState(0);
+  const [apiKey, setApiKey] = useState("");
+  const [orModel, setOrModel] = useState("");
+  const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
+  const [ollamaModel, setOllamaModel] = useState("");
+  const [indexUrl, setIndexUrl] = useState("");
+
+  useInput((input, key) => {
+    if (stage === "provider") {
+      if (key.escape) {
+        exit();
+        return;
+      }
+      if (key.upArrow || input === "k") {
+        setProviderIdx((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (key.downArrow || input === "j") {
+        setProviderIdx((i) => Math.min(PROVIDERS.length - 1, i + 1));
+        return;
+      }
+      if (key.return) {
+        setStage("fields");
+      }
+    }
+  });
+
+  if (stage === "provider") {
+    return (
+      <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
+        <Box marginBottom={1}>
+          <Text bold>Which LLM provider do you want to use?</Text>
+        </Box>
+        {PROVIDERS.map((p, i) => {
+          const selected = i === providerIdx;
+          return (
+            <Box key={p.value} flexDirection="column">
+              <Text color={selected ? "cyan" : "white"}>
+                {selected ? "❯ " : "  "}
+                {p.label}
+              </Text>
+              <Text dimColor> {p.hint}</Text>
+            </Box>
+          );
+        })}
+        <Box marginTop={1}>
+          <Text dimColor>[↑/↓] choose [Enter] next [Esc] abort</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  const p = PROVIDERS[providerIdx];
+  const provider: LlmProviderChoice = p !== undefined ? p.value : "openrouter";
+
+  const fieldsValid =
+    provider === "openrouter"
+      ? apiKey.trim().length > 0 && orModel.trim().length > 0
+      : ollamaUrl.trim().length > 0 && ollamaModel.trim().length > 0;
+
+  if (stage === "fields") {
+    return (
+      <FieldsStage
+        provider={provider}
+        apiKey={apiKey}
+        onApiKey={setApiKey}
+        orModel={orModel}
+        onOrModel={setOrModel}
+        ollamaUrl={ollamaUrl}
+        onOllamaUrl={setOllamaUrl}
+        ollamaModel={ollamaModel}
+        onOllamaModel={setOllamaModel}
+        valid={fieldsValid}
+        onBack={() => {
+          setStage("provider");
+        }}
+        onNext={() => {
+          setStage("repo");
+        }}
+      />
+    );
+  }
+
+  if (stage === "repo") {
+    return (
+      <RepoStage
+        indexUrl={indexUrl}
+        onIndexUrl={setIndexUrl}
+        onBack={() => {
+          setStage("fields");
+        }}
+        onNext={() => {
+          setStage("confirm");
+        }}
+      />
+    );
+  }
+
+  return (
+    <ConfirmStage
+      provider={provider}
+      apiKey={apiKey}
+      orModel={orModel}
+      ollamaUrl={ollamaUrl}
+      ollamaModel={ollamaModel}
+      indexUrl={indexUrl}
+      onBack={() => {
+        setStage("repo");
+      }}
+      onDone={() => {
+        exit();
+        const result: InstallWizardResult = { provider };
+        if (provider === "openrouter") {
+          result.openrouterApiKey = apiKey.trim();
+          result.openrouterModel = orModel.trim();
+        } else {
+          result.ollamaUrl = ollamaUrl.trim();
+          result.ollamaModel = ollamaModel.trim();
+        }
+        if (indexUrl.trim().length > 0) {
+          result.indexUrl = indexUrl.trim();
+        }
+        onDone(result);
+      }}
+    />
+  );
+}
+
+interface FieldsStageProps {
+  provider: LlmProviderChoice;
+  apiKey: string;
+  onApiKey: (v: string) => void;
+  orModel: string;
+  onOrModel: (v: string) => void;
+  ollamaUrl: string;
+  onOllamaUrl: (v: string) => void;
+  ollamaModel: string;
+  onOllamaModel: (v: string) => void;
+  valid: boolean;
+  onBack: () => void;
+  onNext: () => void;
+}
+
+function FieldsStage({
+  provider,
+  apiKey,
+  onApiKey,
+  orModel,
+  onOrModel,
+  ollamaUrl,
+  onOllamaUrl,
+  ollamaModel,
+  onOllamaModel,
+  valid,
+  onBack,
+  onNext,
+}: FieldsStageProps): ReactElement {
+  useInput((_input, key) => {
+    if (key.escape) {
+      onBack();
+      return;
+    }
+    if (key.return && valid) {
+      onNext();
+    }
+  });
+
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
+      <Box marginBottom={1}>
+        <Text bold>{provider === "openrouter" ? "OpenRouter configuration" : "Ollama configuration"}</Text>
+      </Box>
+      {provider === "openrouter" ? (
+        <>
+          <Field id="api-key" label="API key" value={apiKey} onChange={onApiKey} mask autoFocus />
+          <Field id="or-model" label="Model" value={orModel} onChange={onOrModel} />
+        </>
+      ) : (
+        <>
+          <Field id="ollama-url" label="Ollama URL" value={ollamaUrl} onChange={onOllamaUrl} autoFocus />
+          <Field id="ollama-model" label="Model name" value={ollamaModel} onChange={onOllamaModel} />
+        </>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>[Tab] next field [Enter] continue{valid ? "" : " (fill all fields)"} [Esc] back</Text>
+      </Box>
+    </Box>
+  );
+}
+
+interface RepoStageProps {
+  indexUrl: string;
+  onIndexUrl: (v: string) => void;
+  onBack: () => void;
+  onNext: () => void;
+}
+
+function RepoStage({ indexUrl, onIndexUrl, onBack, onNext }: RepoStageProps): ReactElement {
+  useInput((_input, key) => {
+    if (key.escape) {
+      onBack();
+      return;
+    }
+    if (key.return) {
+      onNext();
+    }
+  });
+
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
+      <Box marginBottom={1}>
+        <Text bold>Index a GitHub repo after boot?</Text>
+      </Box>
+      <Field id="repo-url" label="Repo URL" value={indexUrl} onChange={onIndexUrl} autoFocus />
+      <Box marginTop={1}>
+        <Text dimColor>[Enter] next (blank = skip) [Esc] back</Text>
+      </Box>
+    </Box>
+  );
+}
+
+interface ConfirmStageProps {
+  provider: LlmProviderChoice;
+  apiKey: string;
+  orModel: string;
+  ollamaUrl: string;
+  ollamaModel: string;
+  indexUrl: string;
+  onBack: () => void;
+  onDone: () => void;
+}
+
+function ConfirmStage({
+  provider,
+  apiKey,
+  orModel,
+  ollamaUrl,
+  ollamaModel,
+  indexUrl,
+  onBack,
+  onDone,
+}: ConfirmStageProps): ReactElement {
+  useInput((_input, key) => {
+    if (key.escape) {
+      onBack();
+      return;
+    }
+    if (key.return) {
+      onDone();
+    }
+  });
+
+  const maskedKey =
+    apiKey.length === 0 ? "(none)" : `${"•".repeat(Math.min(apiKey.length, 8))}${apiKey.length > 8 ? "…" : ""}`;
+
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1} paddingY={0}>
+      <Box marginBottom={1}>
+        <Text bold>Ready to apply — confirm settings</Text>
+      </Box>
+      <Box flexDirection="column" gap={0}>
+        <Text>
+          {" "}
+          Provider : <Text color="cyan">{provider}</Text>
+        </Text>
+        {provider === "openrouter" ? (
+          <>
+            <Text>
+              {" "}
+              API key : <Text dimColor>{maskedKey}</Text>
+            </Text>
+            <Text>
+              {" "}
+              Model : <Text color="cyan">{orModel || "(not set)"}</Text>
+            </Text>
+          </>
+        ) : (
+          <>
+            <Text>
+              {" "}
+              URL : <Text color="cyan">{ollamaUrl || "(not set)"}</Text>
+            </Text>
+            <Text>
+              {" "}
+              Model : <Text color="cyan">{ollamaModel || "(not set)"}</Text>
+            </Text>
+          </>
+        )}
+        <Text>
+          {" "}
+          Index : <Text color="cyan">{indexUrl.trim().length > 0 ? indexUrl : "(skip)"}</Text>
+        </Text>
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>[Enter] apply & boot [Esc] back</Text>
+      </Box>
+    </Box>
+  );
+}
