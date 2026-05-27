@@ -3,13 +3,12 @@ import React from "react";
 import { render } from "ink";
 import { Command } from "commander";
 import { Config } from "@bb/types";
-import { getConfigValue } from "@bb/config";
+import { getBytebellHome, getConfigValue } from "@bb/config";
 import { InstallWizard, type InstallWizardResult } from "./InstallWizard.tsx";
 import { KEY_MAP } from "./keyMap.ts";
 import { ensureServerRunning, ServerStartTimeoutError } from "./serverSpawn.ts";
 import { getJson, postJson, HttpClientError } from "./httpClient.ts";
 import { success, error, info, createSpinner, createProgressBar, type ProgressBar } from "./output.ts";
-import { getBytebellHome } from "@bb/config";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
