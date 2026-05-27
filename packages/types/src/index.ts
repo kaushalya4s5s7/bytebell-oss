@@ -36,4 +36,26 @@ export type {
   SnapshotFilesInput,
   UpsertFileNodeInput,
   GraphPingResult,
+  ConceptEdgeKind,
+  ContractEdgeKind,
+  UpsertConceptInput,
+  AttachFileToConceptInput,
+  UpsertContractInput,
+  AttachFileToContractInput,
+  UpsertGuidepostInput,
+  AttachGuidepostInput,
+  UpsertTestsEdgeInput,
 } from "./graph.ts";
+export { ConceptKind, ContractKind, GuidepostKind } from "./graph.ts";
+export { EnrichmentState } from "./knowledge.ts";
+export type { EnrichmentFailure, EnrichmentFailureReason } from "./knowledge.ts";
+export { IngestionStrategyType } from "./config.ts";
+export {
+  orgsRootFor,
+  commitBaseDirFor,
+  repositoryDirFor,
+  metaOutputRootFor,
+  bytebellPathsFor,
+  parseGithubOwnerRepo,
+} from "./path-layout.ts";
+export type { RepoLocation, MetaPathsLayout } from "./path-layout.ts";

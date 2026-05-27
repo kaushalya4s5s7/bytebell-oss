@@ -47,6 +47,11 @@ Today the catalog covers:
   `Neo4jConnectError` (driver `verifyConnectivity()` failed; redacts
   userinfo in URI), `Neo4jNotConnectedError` (`_getDriver()` called
   before `connectNeo4j()`).
+- **Layout** — `LayoutMigrationRequiredError` (the legacy on-disk layout
+  `repos/.meta/<knowledgeId>/` is present; the server refuses to boot
+  until the operator runs `bytebell migrate paths`). Carries the
+  detected legacy path in the message and the migration hint as a typed
+  `hint` field.
 
 New error classes land here as new packages are introduced.
 
@@ -73,6 +78,7 @@ class ServerConfigError        extends Error
 class Neo4jConfigError         extends Error
 class Neo4jConnectError        extends Error
 class Neo4jNotConnectedError   extends Error
+class LayoutMigrationRequiredError extends Error
 ```
 
 ## Data ownership

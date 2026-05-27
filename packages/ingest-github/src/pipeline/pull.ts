@@ -10,12 +10,12 @@ import { IngestError, KnowledgeNotFoundError, UsageLimitExceededError } from "@b
 import { classifyFailure } from "./failure-classifier.ts";
 import { transitionState, emptyPullSummary } from "./pull-helpers.ts";
 import { logger } from "@bb/logger";
-import { ensureMetaDirs, metaPathsFor } from "./paths.ts";
+import { pathsFor } from "./paths.ts";
+import { parseGithubRepo } from "#src/githubUrl.ts";
 import { CancellationError, clearCancellation, throwIfCancelled } from "./cancellation.ts";
-import type { DiffResult } from "./git-diff.ts";
 import { affectedFoldersFromDiff } from "./affected-folders.ts";
-import { resolvePullSourceFromDisk } from "./pull-source-resolver.ts";
-import type { PullFactory, SourceReader, ArchiveSink } from "#src/types/pipeline.ts";
+import { resolvePullSource } from "./pull-source-resolver.ts";
+import type { PullFactory } from "#src/types/pipeline.ts";
 import type { ProgressContextFactory } from "#src/progress/types.ts";
 import { nullProgressContextFactory } from "#src/progress/NullProgressReporter.ts";
 import { analyseChangedFiles } from "#src/strategies/flat-folder/analyse-changed.ts";
@@ -80,43 +80,35 @@ export async function runPull(
   try {
     throwIfCancelled(knowledgeId);
 
-    let source: SourceReader;
-    let diff: DiffResult;
-    let targetCommit: string;
-    let archiveSink: ArchiveSink | undefined;
-
-    if (pullFactory !== undefined) {
-      const factoryResult = await pullFactory({ knowledgeId, payload: msg.payload, currentCommit, branch });
-      source = factoryResult.source;
-      diff = factoryResult.diff;
-      targetCommit = factoryResult.targetCommit;
-      archiveSink = factoryResult.archiveSink;
-      logger.info(`pull: pull factory wired (knowledgeId=${knowledgeId}, target=${targetCommit.slice(0, 12)})`);
-      if (targetCommit === currentCommit) {
-        logger.info(`pull: ${knowledgeId} already at ${targetCommit.slice(0, 12)}; no-op`);
-        await transitionState(knowledgeId, KnowledgeState.Processed);
-        return emptyPullSummary(targetCommit);
-      }
-    } else {
-      const resolveInput: Parameters<typeof resolvePullSourceFromDisk>[0] = {
-        msg,
-        knowledgeId,
-        repoUrl,
-        branch,
-        currentCommit,
-      };
-      if (gitToken !== undefined) {
-        resolveInput.gitToken = gitToken;
-      }
-      const resolved = await resolvePullSourceFromDisk(resolveInput);
-      source = resolved.source;
-      diff = resolved.diff;
-      targetCommit = resolved.targetCommit;
-      if (resolved.noOp) {
-        await transitionState(knowledgeId, KnowledgeState.Processed);
-        return emptyPullSummary(targetCommit);
-      }
+    // Parse owner/repo up front — the resolver needs them to build the
+    // commit-scoped path under the new layout.
+    const parsed = parseGithubRepo(repoUrl);
+    if (parsed === null) {
+      throw new IngestError(knowledgeId, `could not parse owner/repo from repoUrl=${repoUrl}`);
     }
+    const orgId = resolveOrgId({});
+
+    // Resolves target SHA via GitHub REST (or operator-supplied), clones into
+    // the commit-scoped `repository/` dir, computes the diff. See
+    // `pull-source-resolver.ts` for the dance.
+    const resolution = await resolvePullSource({
+      knowledgeId,
+      payload: msg.payload,
+      currentCommit,
+      branch,
+      repoUrl,
+      gitToken,
+      orgId,
+      owner: parsed.owner,
+      repo: parsed.repo,
+      pullFactory,
+    });
+    if (resolution.kind === "noop") {
+      logger.info(`pull: ${knowledgeId} already at ${resolution.targetCommit.slice(0, 12)}; no-op`);
+      await transitionState(knowledgeId, KnowledgeState.Processed);
+      return emptyPullSummary(resolution.targetCommit);
+    }
+    const { source, diff, targetCommit, location, archiveSink } = resolution;
 
     throwIfCancelled(knowledgeId);
     await filesGraph.snapshotFilesToVersion({ knowledgeId, commitHash: currentCommit }).catch((cause: unknown) => {
@@ -124,8 +116,9 @@ export async function runPull(
       logger.warn(`pull: snapshot of ${currentCommit.slice(0, 12)} failed (non-fatal): ${msgText}`);
     });
 
-    const metaPaths = metaPathsFor(knowledgeId);
-    await ensureMetaDirs(metaPaths);
+    // Meta-output for the new target commit. Past commits' meta-output stays
+    // untouched in its own sibling dir.
+    const metaPaths = pathsFor(location);
 
     const affectedFolders = affectedFoldersFromDiff(diff);
 
@@ -219,7 +212,6 @@ export async function runPull(
     progressContext.phaseChanged("indexing");
     logger.info(`pull: phase repo summary starting`);
     throwIfCancelled(knowledgeId);
-    const orgId = resolveOrgId({ ...(kDoc.source.kind === "github" ? {} : {}) });
     const scope: NodeScope = { orgId, knowledgeId, repoId: knowledgeId };
     const { summary: repoSummary, tokenUsage: repoUsage } = await summariseRepo(knowledgeId, metaPaths, llmCallContext);
     totalInputTokens += repoUsage.inputTokens;

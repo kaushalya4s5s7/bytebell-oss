@@ -1,42 +1,108 @@
-import type { GithubPullPayload, JobMessage } from "@bb/types";
+import { type GithubPullPayload } from "@bb/types";
 import { IngestError } from "@bb/errors";
 import { logger } from "@bb/logger";
-import { ensureReposRoot, repoCloneDir } from "./paths.ts";
+import { ensureCommitDirs, pathsFor, type RepoLocation } from "./paths.ts";
 import { readHeadCommitHash, syncRepository } from "./source.ts";
-import { assertReachableFromBranch, checkoutCommit, emptyDiff, type DiffResult } from "./git-diff.ts";
+import { assertReachableFromBranch, checkoutCommit, type DiffResult } from "./git-diff.ts";
 import { computePullDiff, materialiseEndpoints } from "./pull-diff-resolver.ts";
 import { createDiskSourceReader } from "./disk-source-reader.ts";
-import type { SourceReader } from "#src/types/pipeline.ts";
+import { fetchLatestCommitHash } from "#src/githubApi.ts";
+import type { ArchiveSink, PullFactory, SourceReader } from "#src/types/pipeline.ts";
 
-export interface ResolvedPullSource {
-  source: SourceReader;
-  diff: DiffResult;
-  targetCommit: string;
-  /** True when the resolved target equals the previously-indexed commit. Caller short-circuits to a no-op. */
-  noOp: boolean;
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Resolves the "repository state" prelude for `runPull`:
+//   1. Pre-clone resolution of `targetCommit` (operator-supplied or branch HEAD).
+//   2. Builds the commit-scoped `RepoLocation` so the clone lands directly in
+//      `repository/`.
+//   3. Performs the clone + history deepening + diff computation, OR delegates
+//      to the optional `pullFactory` (no-clone path for downstream consumers).
+//   4. Short-circuits to a no-op when target == current.
+//
+// Returns either `{ kind: "noop" }` (caller transitions state + returns empty
+// summary) or `{ kind: "ready", source, diff, targetCommit, location,
+// archiveSink? }` (caller proceeds with the analysis phases).
+//
+// Extracted from `pull.ts` to keep that file under the 300-line cap.
+// ─────────────────────────────────────────────────────────────────────────────
 
-export interface ResolveDiskInput {
-  msg: JobMessage<GithubPullPayload>;
+export type PullSourceResolution =
+  | { kind: "noop"; targetCommit: string }
+  | {
+      kind: "ready";
+      source: SourceReader;
+      diff: DiffResult;
+      targetCommit: string;
+      location: RepoLocation;
+      archiveSink: ArchiveSink | undefined;
+    };
+
+export interface ResolvePullSourceInput {
   knowledgeId: string;
-  repoUrl: string;
-  branch: string;
+  payload: GithubPullPayload;
   currentCommit: string;
-  gitToken?: string;
+  branch: string;
+  repoUrl: string;
+  gitToken: string | undefined;
+  orgId: string;
+  owner: string;
+  repo: string;
+  pullFactory: PullFactory | undefined;
 }
 
-/**
- * Disk-backed fallback that runs when no `PullFactory` is supplied. Clones (or
- * fetch+resets) the repo, resolves the target commit, deepens the shallow
- * clone to make non-HEAD targets reachable, asserts branch ancestry,
- * computes the diff, and checks out the target. Returns `noOp: true` when
- * the target matches the previously-indexed commit so the caller can
- * transition to PROCESSED without further work.
- */
-export async function resolvePullSourceFromDisk(input: ResolveDiskInput): Promise<ResolvedPullSource> {
-  const { knowledgeId, repoUrl, branch, currentCommit, gitToken } = input;
-  await ensureReposRoot();
-  const repoDir = repoCloneDir(knowledgeId);
+export async function resolvePullSource(input: ResolvePullSourceInput): Promise<PullSourceResolution> {
+  const { knowledgeId, payload, currentCommit, branch, repoUrl, gitToken, orgId, owner, repo, pullFactory } = input;
+
+  if (pullFactory !== undefined) {
+    const factoryResult = await pullFactory({ knowledgeId, payload, currentCommit, branch });
+    const location: RepoLocation = {
+      provider: "github",
+      orgId,
+      knowledgeId,
+      owner,
+      repo,
+      commitHash: factoryResult.targetCommit,
+    };
+    logger.info(
+      `pull: pull factory wired (knowledgeId=${knowledgeId}, target=${factoryResult.targetCommit.slice(0, 12)})`,
+    );
+    if (factoryResult.targetCommit === currentCommit) {
+      return { kind: "noop", targetCommit: factoryResult.targetCommit };
+    }
+    return {
+      kind: "ready",
+      source: factoryResult.source,
+      diff: factoryResult.diff,
+      targetCommit: factoryResult.targetCommit,
+      location,
+      archiveSink: factoryResult.archiveSink,
+    };
+  }
+
+  // Resolve targetCommit BEFORE clone so the clone can land directly in the
+  // commit-scoped `repository/` dir. Operator-supplied `targetCommitHash`
+  // wins; otherwise the GitHub REST API gives us the current branch HEAD.
+  let resolvedTarget = payload.targetCommitHash;
+  if (resolvedTarget === undefined) {
+    const headSha = await fetchLatestCommitHash(repoUrl, branch, gitToken);
+    if (headSha === null) {
+      throw new IngestError(knowledgeId, `could not resolve branch HEAD for ${owner}/${repo}@${branch}`);
+    }
+    resolvedTarget = headSha;
+  }
+  if (resolvedTarget === currentCommit) {
+    return { kind: "noop", targetCommit: resolvedTarget };
+  }
+
+  let location: RepoLocation = {
+    provider: "github",
+    orgId,
+    knowledgeId,
+    owner,
+    repo,
+    commitHash: resolvedTarget,
+  };
+  await ensureCommitDirs(location);
+  const repoDir = pathsFor(location).repositoryDir;
   const cloneOpts: { repoUrl: string; branch: string; destinationDir: string; gitToken?: string } = {
     repoUrl,
     branch,
@@ -51,16 +117,17 @@ export async function resolvePullSourceFromDisk(input: ResolveDiskInput): Promis
   if (branchHead === "unknown") {
     throw new IngestError(knowledgeId, "could not resolve branch HEAD after clone");
   }
-  const targetCommit = input.msg.payload.targetCommitHash ?? branchHead;
-
-  if (targetCommit === currentCommit) {
-    logger.info(`pull: ${knowledgeId} already at ${targetCommit.slice(0, 12)}; no-op`);
-    return {
-      source: createDiskSourceReader({ repoDir, commitHash: targetCommit }),
-      diff: emptyDiff(),
-      targetCommit,
-      noOp: true,
-    };
+  // If the operator didn't specify a target, accept the post-clone HEAD
+  // (handles drift between resolve and clone). For an explicit target, keep
+  // the requested value — `materialiseEndpoints` + `checkoutCommit` will
+  // navigate to it inside the deepened history.
+  const targetCommit = payload.targetCommitHash ?? branchHead;
+  if (targetCommit !== resolvedTarget) {
+    logger.warn(
+      `pull: commit drift between REST and clone for ${knowledgeId} (resolved=${resolvedTarget.slice(0, 12)} actual=${targetCommit.slice(0, 12)}); rebuilding paths under actual`,
+    );
+    location = { ...location, commitHash: targetCommit };
+    await ensureCommitDirs(location);
   }
 
   // Deepen the shallow clone first so historical commits selected via the
@@ -78,5 +145,6 @@ export async function resolvePullSourceFromDisk(input: ResolveDiskInput): Promis
   const diff = await computePullDiff(repoDir, currentCommit, targetCommit);
   await checkoutCommit(repoDir, targetCommit);
   const source = createDiskSourceReader({ repoDir, commitHash: targetCommit });
-  return { source, diff, targetCommit, noOp: false };
+
+  return { kind: "ready", source, diff, targetCommit, location, archiveSink: undefined };
 }

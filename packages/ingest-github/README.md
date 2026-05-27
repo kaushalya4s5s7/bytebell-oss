@@ -11,20 +11,25 @@ boot). Never by `@bb/cli`.
 ## Responsibility
 
 Consumes `JobType.GithubIndex` and `JobType.LocalIngest` jobs published
-by `@bb/queue`. For each job, runs the active `IngestionStrategy` over
-the populated `~/.bytebell/repos/<knowledgeId>/` directory and persists
-per-file results to Mongo (`raw` collection via `@bb/mongo`) **and**
-Neo4j (`:File` nodes + `:HAS_KEYWORD` / `:HAS_CLASS` / `:HAS_FUNCTION`
-/ `:HAS_IMPORT_INTERNAL` / `:HAS_IMPORT_EXTERNAL` rels via `@bb/neo4j`). v1 ships one strategy —
-`BasicFileAnalysisStrategy` — implementing the deliberately minimal
-"very basic file analysis" approach.
+by `@bb/queue`. For each job, runs the active `IngestionStrategy`
+(selected via `Config.IngestionStrategy`: `flat-folder` default, or
+`concept-graph` for the hypergraph-enrichment strategy) over the cloned
+source tree at
+`~/.bytebell/orgs/<orgId>/<provider>/<knowledgeId>/<owner>/<repo>/<commit>/repository/`
+and persists per-file results to Mongo (`raw` collection via
+`@bb/mongo`) **and** Neo4j (`:File` nodes + `:HAS_KEYWORD` /
+`:HAS_CLASS` / `:HAS_FUNCTION` / `:HAS_IMPORT_INTERNAL` /
+`:HAS_IMPORT_EXTERNAL` rels via `@bb/neo4j`).
 
 The package owns:
 
 - The `github_index` and `local_ingest` worker handlers (registered via
   `@bb/queue.registerWorker`)
-- The git clone / fetch lifecycle for one repo per knowledge ID, kept on
-  disk under `~/.bytebell/repos/<knowledgeId>/` for future `git_pull`
+- The git clone / fetch lifecycle for one repo per knowledge ID. Commit
+  SHA is resolved via the GitHub REST API (`fetchLatestCommitHash`)
+  _before_ clone so the clone lands directly in the commit-scoped
+  `repository/` directory — no staging rename. Older commits' trees
+  stay alongside the current head for forensic comparison.
 - The hardcoded ignore list (directories, lockfiles, binary extensions,
   size cap) for repo scanning
 - The 9-field per-file LLM analysis prompt (small-file path) and the
@@ -95,18 +100,31 @@ unset — every hook call short-circuits via `await usageGuard?.…` and
 behavior is identical to today.
 
 Both `register*Workers()` calls run once at `@bb/server` boot. The
-worker hardcodes a single `IngestionStrategy` instance (currently
-`new BasicFileAnalysisStrategy()`). Adding another strategy = new file
+worker picks the active `IngestionStrategy` based on
+`Config.IngestionStrategy`:
 
-- change one line in `src/worker.ts`.
+- `flat-folder` (default) — produces `:Repo` + `:Folder` summaries
+  alongside `:File` analysis. The historic 7-phase pipeline.
+- `concept-graph` — drops `:Folder`/`:Repo` and runs per-file MCP
+  enrichment in their place, emitting `:Concept` / `:Contract` /
+  `:Guidepost` hypergraph nodes. See
+  `src/strategies/concept-graph/README.md`.
+
+Adding another strategy = new sibling folder under `src/strategies/`
+plus a branch in `pickStrategy()` in `src/index.ts`.
 
 ## Data ownership
 
-- `~/.bytebell/repos/<knowledgeId>/` — the cloned working tree (for
-  `github_index`) or the server-copied working tree (for `local_ingest`),
-  persisted across job retries (clone is idempotent: `git fetch + reset`
-  if `.git` exists). Never deleted automatically — `bytebell clean` per
-  [docs/arch.md:157](../../docs/arch.md#L157) will own removal.
+- `~/.bytebell/orgs/<orgId>/github/<knowledgeId>/<owner>/<repo>/<commit>/repository/`
+  — the cloned working tree for each indexed commit (for `github_index`
+  / `github_pull`). Persisted across job retries (clone is idempotent:
+  `git fetch + reset` if `.git` exists). Each commit gets its own
+  self-contained snapshot — older commits' trees stay alongside the
+  current head until the operator prunes. Local ingest jobs do NOT
+  populate this dir; they read from `KnowledgeDoc.source.sourcePath` (the
+  user's original directory) directly. Never deleted automatically —
+  `bytebell clean` per [docs/arch.md:157](../../docs/arch.md#L157)
+  will own removal.
 - The Knowledge document's `status.state` field — written via
   `setKnowledgeState` from `@bb/mongo` AND
   `setKnowledgeStateInGraph` from `@bb/neo4j`, kept in lock-step.
@@ -204,7 +222,8 @@ worker hardcodes a single `IngestionStrategy` instance (currently
 - Model escalation
 - LLM-based ignore decisions
 - Cost ledger (the `@bb/llm` package itself doesn't have one yet)
-- Auto-cleanup of `~/.bytebell/repos/<knowledgeId>/`
+- Auto-cleanup of the `~/.bytebell/orgs/<orgId>/<provider>/<knowledgeId>/`
+  commit-scoped tree (clones + meta-output)
 
 ## How to extend
 
