@@ -7,9 +7,8 @@ import { getConfigValue } from "@bb/config";
 import { InstallWizard, type InstallWizardResult } from "./InstallWizard.tsx";
 import { KEY_MAP } from "./keyMap.ts";
 import { ensureServerRunning, ServerStartTimeoutError } from "./serverSpawn.ts";
-import { postJson, HttpClientError } from "./httpClient.ts";
+import { getJson, postJson, HttpClientError } from "./httpClient.ts";
 import { success, error, info, createSpinner, createProgressBar, type ProgressBar } from "./output.ts";
-import { getJson } from "./httpClient.ts";
 
 export function buildSetupCommand(): Command {
   const cmd = new Command("setup");
