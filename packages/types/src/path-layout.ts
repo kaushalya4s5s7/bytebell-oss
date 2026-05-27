@@ -7,10 +7,19 @@ import path from "node:path";
 // `getBytebellHome()` (the package boundary that holds the home-dir state).
 //
 // Layout (per knowledge + provider + commit):
-//   `<home>/orgs/<orgId>/<provider>/<knowledgeId>/<owner>/<repo>/<commit>/repository/`
-//   `<home>/orgs/<orgId>/<provider>/<knowledgeId>/<owner>/<repo>/<commit>/meta-output/`
+//   `<home>/<provider>/<knowledgeId>/<owner>/<repo>/<commit>/repository/`
+//   `<home>/<provider>/<knowledgeId>/<owner>/<repo>/<commit>/meta-output/`
 // For local sources the `<owner>/<repo>` segments collapse:
-//   `<home>/orgs/<orgId>/local/<knowledgeId>/<commit>/repository/`
+//   `<home>/local/<knowledgeId>/<commit>/repository/`
+//
+// `<home>` is the per-tenant base directory:
+//   • OSS standalone: `~/.bytebell/` (single-tenant; no org segment)
+//   • Enterprise: `<KNOWLEDGE_BASE_PATH>/orgs/<orgName>/` (via the
+//     `setBytebellHomeResolver` override in `seed-oss-config.ts`)
+//
+// The resolver deliberately stays org-agnostic. The org segment lives in
+// `<home>` when the host requires per-tenant isolation — adding it again
+// here would duplicate it for enterprise consumers.
 //
 // See `@bb/ingest-github/src/pipeline/paths.ts` for the I/O-aware wrappers
 // that pair with this module.
@@ -50,15 +59,22 @@ export interface MetaPathsLayout {
   repoSummaryJson: string;
 }
 
+/**
+ * Deprecated. Kept as a back-compat shim for the migration tool, which
+ * describes the legacy layout `<home>/orgs/<orgId>/…`. The active layout
+ * no longer adds an `orgs/` segment here — that responsibility moved into
+ * `<home>` itself (enterprise's `getBytebellHome` resolver returns a
+ * per-tenant `<base>/orgs/<orgName>/`).
+ */
 export function orgsRootFor(home: string): string {
   return path.join(home, "orgs");
 }
 
 export function commitBaseDirFor(home: string, loc: RepoLocation): string {
   if (loc.provider === "github") {
-    return path.join(orgsRootFor(home), loc.orgId, "github", loc.knowledgeId, loc.owner, loc.repo, loc.commitHash);
+    return path.join(home, "github", loc.knowledgeId, loc.owner, loc.repo, loc.commitHash);
   }
-  return path.join(orgsRootFor(home), loc.orgId, "local", loc.knowledgeId, loc.commitHash);
+  return path.join(home, "local", loc.knowledgeId, loc.commitHash);
 }
 
 export function repositoryDirFor(home: string, loc: RepoLocation): string {

@@ -60,7 +60,15 @@ export async function askLLMWithTools(opts: AskLLMWithToolsOptions): Promise<Ask
     const remainingWallTime = opts.wallTimeMs - elapsed;
     const timeoutForThisCall = Math.min(perRequestTimeoutMs, remainingWallTime);
 
-    const chatResult = await openRouterRawChat(messages, chain, subOpts, timeoutForThisCall, toolDefs);
+    // Force at least one MCP tool call by setting `tool_choice: "required"`
+    // on the first turn. Without this, models like Grok and GPT-4o often
+    // skip tools entirely when the prompt context already lets them emit
+    // valid JSON — defeating the cross-file canonicalisation that's the
+    // whole point of concept-graph enrichment. After the first tool call
+    // we drop back to "auto" so the model can produce its terminal JSON
+    // turn without being forced into more tool calls.
+    const toolChoice = iterations === 0 && toolDefs !== undefined ? ("required" as const) : undefined;
+    const chatResult = await openRouterRawChat(messages, chain, subOpts, timeoutForThisCall, toolDefs, toolChoice);
     iterations += 1;
     accumulateUsage(cumulativeUsage, chatResult.usage);
 

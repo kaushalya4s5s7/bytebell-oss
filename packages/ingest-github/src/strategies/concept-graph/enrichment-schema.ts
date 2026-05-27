@@ -51,11 +51,32 @@ export const testTargetSchema = z.object({
   targetRelativePath: z.string().min(1),
 });
 
+/**
+ * Tolerant wrapper around `testTargetSchema`. LLMs routinely emit
+ * `testTarget: null` (and sometimes `""` or `{}`) for non-test files
+ * instead of omitting the key as the prompt asks. Preprocess to treat
+ * any null / empty-string / empty-object value as absent. Real test
+ * targets (objects with `targetRelativePath`) still go through strict
+ * validation.
+ */
+const tolerantTestTargetSchema = z.preprocess((value) => {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value === "string" && value.length === 0) {
+    return undefined;
+  }
+  if (typeof value === "object" && Object.keys(value as object).length === 0) {
+    return undefined;
+  }
+  return value;
+}, testTargetSchema.optional());
+
 export const perFileEnrichmentSchema = z.object({
   concepts: z.array(conceptAttachmentSchema).max(20).default([]),
   contracts: z.array(contractAttachmentSchema).max(20).default([]),
   guideposts: z.array(guidepostSchema).max(10).default([]),
-  testTarget: testTargetSchema.optional(),
+  testTarget: tolerantTestTargetSchema,
 });
 
 export type PerFileEnrichment = z.infer<typeof perFileEnrichmentSchema>;

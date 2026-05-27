@@ -50,11 +50,23 @@ interface OpenRouterProviderRouting {
   allow_fallbacks: boolean;
 }
 
+/**
+ * OpenRouter / OpenAI-style `tool_choice` field. We restrict to the two
+ * values we actually use:
+ *   - `"auto"` (default when omitted): model decides whether to call tools.
+ *   - `"required"`: model MUST emit at least one tool call this turn. Used
+ *     by `askLLMWithTools` on the first turn so models that would otherwise
+ *     skip tools (Grok, GPT-4o under some prompts) are forced to query the
+ *     graph at least once.
+ */
+export type OpenRouterToolChoice = "auto" | "required";
+
 interface OpenRouterRequest {
   model: string;
   models?: string[];
   messages: OpenRouterMessageInput[];
   tools?: OpenRouterToolDef[];
+  tool_choice?: OpenRouterToolChoice;
   usage: OpenRouterUsageAccounting;
   provider: OpenRouterProviderRouting;
 }
@@ -83,6 +95,7 @@ export async function openRouterRawChat(
   opts: AskLlmOptions,
   timeoutMs: number,
   tools?: OpenRouterToolDef[],
+  toolChoice?: OpenRouterToolChoice,
 ): Promise<OpenRouterChatResult> {
   const apiKey = opts.apiKey ?? getConfigValue(Config.OpenrouterApiKey);
   const model = modelChain[0] ?? opts.model ?? getConfigValue(Config.OpenrouterModel);
@@ -98,6 +111,12 @@ export async function openRouterRawChat(
   }
   if (tools !== undefined && tools.length > 0) {
     body.tools = tools;
+    // Only sent when tools are present; OpenRouter rejects `tool_choice`
+    // without a corresponding `tools[]`. Default is "auto" — callers opt
+    // into "required" when they want to force at least one tool call.
+    if (toolChoice !== undefined) {
+      body.tool_choice = toolChoice;
+    }
   }
 
   const controller = new AbortController();
