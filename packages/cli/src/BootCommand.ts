@@ -127,6 +127,14 @@ async function handlePortConflict(
   const composeService = composeServiceFor(infraService);
   const serviceLabel = labelForService(infraService);
   const ctx = await diagnosePortConflict(cause.port, serviceLabel);
+
+  if (process.stdin.isTTY !== true) {
+    error(
+      `Port ${cause.port} conflict on ${serviceLabel} — cannot resolve interactively (no TTY). Free the port and retry.`,
+    );
+    return false;
+  }
+
   const resolution = await promptPortConflict(ctx);
 
   if (resolution.action === "cancel") {

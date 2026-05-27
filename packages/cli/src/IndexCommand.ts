@@ -201,7 +201,16 @@ async function probeRepo(
     return res;
   }
 
-  // 4. Interactive menu flow
+  // 4. Interactive menu flow — skip when stdin is not a TTY (e.g. install script)
+  if (process.stdin.isTTY !== true) {
+    const defaultBranch = probe.defaultBranch ?? "main";
+    const res: { branch: string | null; token?: string } = { branch: defaultBranch };
+    if (token) {
+      res.token = token;
+    }
+    return res;
+  }
+
   const defaultBranch = probe.defaultBranch ?? "main";
   const choice = await promptInitialBranch(defaultBranch);
   if (choice === null) {
