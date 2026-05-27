@@ -77,12 +77,20 @@ async function runIndex(
   }
 }
 
+interface RepoFailure {
+  reason: string;
+  category: string;
+  at: string;
+  detail?: string;
+}
+
 interface RepoStatus {
   knowledgeId: string;
   state: string;
   fileCount: number;
   totalFiles?: number;
   processedFiles?: number;
+  failure?: RepoFailure | null;
 }
 
 async function pollJobStatus(knowledgeId: string, jobId: string): Promise<void> {
@@ -113,10 +121,17 @@ async function pollJobStatus(knowledgeId: string, jobId: string): Promise<void> 
         return;
       }
       if (status.state === "FAILED") {
+        const failMsg = status.failure?.reason ?? "unknown error";
         if (bar) {
-          bar.stop(false, `Indexing failed for ${knowledgeId}`);
+          bar.stop(false, `Indexing failed: ${failMsg}`);
         } else {
-          spinner.stop(false, `Indexing failed for ${knowledgeId}`);
+          spinner.stop(false, `Indexing failed: ${failMsg}`);
+        }
+        if (status.failure) {
+          error(`category: ${status.failure.category}`);
+          if (status.failure.detail) {
+            error(`detail:   ${status.failure.detail}`);
+          }
         }
         return;
       }

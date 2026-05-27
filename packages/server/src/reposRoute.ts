@@ -39,6 +39,7 @@ export function buildReposRoute(): Router {
       fileCount: entry.fileCount,
       totalFiles: entry.status.totalFiles,
       processedFiles: entry.status.processedFiles,
+      failure: entry.failure ?? null,
     });
   });
 
