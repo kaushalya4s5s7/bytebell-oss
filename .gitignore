@@ -7,6 +7,10 @@ node_modules/
 bun.lockb
 .bun/
 
+
+#competitor
+/competitor/
+
 # Build artifacts
 dist/
 build/
