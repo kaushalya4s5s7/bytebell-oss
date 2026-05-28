@@ -53,6 +53,13 @@ The package owns:
   single file used to cost.
 - Folder-node CRUD (`upsertFolderNode`, `upsertFolderNodesBatch`) —
   same shape as file CRUD; batched variant for bulk indexing.
+- Repo-node CRUD (`upsertRepoNode`) — writes a `:Repo` carrying the
+  per-repo summary payload (purpose, dataFlow, keyPatterns, etc.) and
+  in the same transaction MERGEs a snake_case `:Knowledge` mirror plus
+  the `:HAS_REPO` edge. The mirror carries both `knowledge_id` (snake)
+  and `knowledgeId` (camel) on the same node so the chat-mcp reader
+  (`MATCH (k:Knowledge {org_id})`) and `upsertKnowledgeNode` (MERGE on
+  `knowledgeId`) both converge on a single node.
 - Concept-graph CRUD (ConceptGraphStrategy) — `upsertConcept`,
   `attachFileToConcept` (dispatches HAS_CONCEPT / PLAYS_ROLE /
   BELONGS_TO_DOMAIN), `upsertTestsEdge` (file-to-file `:TESTS`),
