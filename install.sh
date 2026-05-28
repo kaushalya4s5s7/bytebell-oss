@@ -37,7 +37,23 @@ if ! command -v docker &>/dev/null; then
   exit 1
 fi
 
-if ! timeout 5 docker info &>/dev/null 2>&1; then
+check_docker_running() {
+  docker info >/dev/null 2>&1 &
+  local pid=$!
+  local count=0
+  while kill -0 $pid 2>/dev/null; do
+    sleep 1
+    count=$((count + 1))
+    if [ $count -ge 5 ]; then
+      kill -9 $pid 2>/dev/null || true
+      return 1
+    fi
+  done
+  wait $pid
+  return $?
+}
+
+if ! check_docker_running; then
   print_err "Docker is installed but not running. Start Docker Desktop and retry."
   exit 1
 fi
