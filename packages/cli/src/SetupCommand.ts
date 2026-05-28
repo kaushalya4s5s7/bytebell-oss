@@ -6,12 +6,12 @@ import { Config } from "@bb/types";
 import { getBytebellHome, getConfigValue } from "@bb/config";
 import { InstallWizard, type InstallWizardResult } from "./InstallWizard.tsx";
 import { KEY_MAP } from "./keyMap.ts";
-import { ensureServerRunning, ServerStartTimeoutError } from "./serverSpawn.ts";
-import { postJson, HttpClientError } from "./httpClient.ts";
-import { success, error, info, createSpinner } from "./output.ts";
-import { pollIndexToCompletion, type IndexResponse } from "./indexPoller.ts";
-import { readFile, stat } from "node:fs/promises";
+import { applyInfraDefaults, bringInfraUp, startServer } from "./bootConfig.ts";
+import { readPid, waitForPidFileGone } from "./ShutdownCommand.ts";
 import path from "node:path";
+import { postJson, HttpClientError } from "./httpClient.ts";
+import { success, error, info } from "./output.ts";
+import { pollIndexToCompletion, type IndexResponse } from "./indexPoller.ts";
 
 export function buildSetupCommand(): Command {
   const cmd = new Command("setup");
@@ -30,7 +30,13 @@ async function runSetup(): Promise<void> {
     info("Setup cancelled.");
     return;
   }
-  applyConfig(result);
+  try {
+    applyConfig(result);
+  } catch (cause: unknown) {
+    error(cause instanceof Error ? cause.message : String(cause));
+    process.exitCode = 1;
+    return;
+  }
   const booted = await boot();
   if (!booted) {
     return;
@@ -111,56 +117,50 @@ function applyConfig(result: InstallWizardResult): void {
   }
 }
 
-async function stopRunningServer(): Promise<void> {
-  const pidFile = path.join(getBytebellHome(), "pid");
-  let pid: number | null = null;
-  try {
-    const raw = await readFile(pidFile, "utf8");
-    const n = Number.parseInt(raw.trim(), 10);
-    if (Number.isFinite(n) && n > 0) {
-      pid = n;
-    }
-  } catch {
-    return;
-  }
-  if (pid === null) {
-    return;
-  }
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    return;
-  }
-  for (let i = 0; i < 25; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    try {
-      await stat(pidFile);
-    } catch {
-      return;
-    }
-  }
-}
-
 async function boot(): Promise<boolean> {
-  const spinner = createSpinner("Starting ByteBell server...");
-  try {
-    spinner.update("Stopping any running server...");
-    await stopRunningServer();
-    const ctx = await ensureServerRunning((line) => spinner.update(`Server: ${line}`));
-    spinner.stop(true, `Server started (logs: ${ctx.logPath ?? "n/a"})`);
-    const port = getConfigValue(Config.ServerPort);
-    success(`MCP endpoint: http://127.0.0.1:${port}/mcp`);
-    return true;
-  } catch (cause: unknown) {
-    spinner.stop(false, "Server startup failed");
-    if (cause instanceof ServerStartTimeoutError) {
-      error(cause.message);
-    } else {
-      error(cause instanceof Error ? cause.message : String(cause));
+  const pidFile = path.join(getBytebellHome(), "pid");
+  const pid = await readPid(pidFile);
+  if (pid !== null) {
+    info("Stopping any running server...");
+    try {
+      process.kill(pid, "SIGTERM");
+      await waitForPidFileGone(pidFile);
+    } catch {
+      // stale pid — nothing running
     }
+  }
+
+  const defaults = applyInfraDefaults();
+  for (const entry of defaults.written) {
+    if (entry.redacted) {
+      success(`set ${entry.cliKey}=<redacted> (auto-generated)`);
+    } else {
+      success(`set ${entry.cliKey} (auto-filled with local-docker default)`);
+    }
+  }
+
+  if (defaults.neo4jPassword.length === 0) {
+    error("internal: neo4j password is empty after applyInfraDefaults — refusing to start docker.");
     process.exitCode = 1;
     return false;
   }
+
+  const upResult = await bringInfraUp(defaults.neo4jPassword);
+  if (upResult === null) {
+    return false;
+  }
+  success(`mongo  → ${upResult.services.mongo}`);
+  success(`neo4j  → ${upResult.services.neo4j}`);
+  success(`redis  → ${upResult.services.redis}`);
+
+  const started = await startServer();
+  if (!started) {
+    return false;
+  }
+
+  const port = getConfigValue(Config.ServerPort);
+  success(`MCP endpoint: http://127.0.0.1:${port}/mcp`);
+  return true;
 }
 
 async function startIndex(repoUrl: string): Promise<void> {

@@ -225,6 +225,11 @@ Key source files added in the `setup` command:
 - `src/InstallWizardStages.tsx` — `FieldsStage`, `RepoStage`, `ConfirmStage` sub-components (split from `InstallWizard.tsx` to honour the 300-line rule).
 - `src/indexPoller.ts` — shared `pollIndexToCompletion()` used by both `IndexCommand.ts` and `SetupCommand.ts`; also exports the `IndexResponse` and `RepoStatus` types so neither command duplicates them.
 
+Boot and shutdown logic reused by `setup`:
+
+- `src/bootConfig.ts` — owns all boot-phase utilities: `applyInfraDefaults()`, `checkPreflight()`, `bringInfraUp()` (Docker compose up with port-conflict handling), and `startServer()`. `BootCommand.ts` and `SetupCommand.ts` both delegate to this module — no duplication.
+- `src/serverSpawn.ts` — owns server process management: `ensureServerRunning()` and `stopServer()` (SIGTERM + pid-file poll). `ShutdownCommand.ts` and `SetupCommand.ts` both delegate here.
+
 Adding a new subcommand:
 
 1. Create `src/<Name>Command.ts` (PascalCase, plain `.ts`) exporting

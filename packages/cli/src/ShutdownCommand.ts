@@ -108,7 +108,7 @@ async function stopDocker(): Promise<void> {
   }
 }
 
-async function readPid(pidFile: string): Promise<number | null> {
+export async function readPid(pidFile: string): Promise<number | null> {
   try {
     const raw = await readFile(pidFile, "utf8");
     const trimmed = raw.trim();
@@ -125,7 +125,7 @@ async function readPid(pidFile: string): Promise<number | null> {
   }
 }
 
-async function waitForPidFileGone(pidFile: string): Promise<boolean> {
+export async function waitForPidFileGone(pidFile: string): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < POLL_TIMEOUT_MS) {
     if (!(await pidFileExists(pidFile))) {
