@@ -56,13 +56,14 @@ async function runBoot(): Promise<void> {
     info(`dev mode: logs → ${process.cwd()}/logs/`);
   }
 
-  if (defaults.neo4jPassword.length === 0) {
-    error("internal: neo4j password is empty after applyInfraDefaults — refusing to start docker.");
+  const neo4jPassword = getConfigValue(Config.Neo4jPassword);
+  if (neo4jPassword.length === 0) {
+    error("internal: neo4j password is empty after setup — refusing to start docker.");
     process.exitCode = 1;
     return;
   }
 
-  const upResult = await bringInfraUp(defaults.neo4jPassword);
+  const upResult = await bringInfraUp(neo4jPassword);
   if (upResult === null) {
     return;
   }
