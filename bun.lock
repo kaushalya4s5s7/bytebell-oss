@@ -31,6 +31,7 @@
         "@bb/ingest-github": "workspace:*",
         "@bb/logger": "workspace:*",
         "@bb/mongo": "workspace:*",
+        "@bb/path-migration": "workspace:*",
         "@bb/types": "workspace:*",
         "commander": "^14.0.3",
         "ink": "^7.0.1",
@@ -201,6 +202,13 @@
         "neo4j-driver": "^6.0.1",
       },
     },
+    "packages/path-migration": {
+      "name": "@bb/path-migration",
+      "version": "0.0.0",
+      "dependencies": {
+        "@bb/types": "workspace:*",
+      },
+    },
     "packages/queue": {
       "name": "@bb/queue",
       "version": "0.0.0",
@@ -240,6 +248,7 @@
         "@bb/mcp": "workspace:*",
         "@bb/mongo": "workspace:*",
         "@bb/neo4j": "workspace:*",
+        "@bb/path-migration": "workspace:*",
         "@bb/queue": "workspace:*",
         "@bb/redis": "workspace:*",
         "@bb/sqlite": "workspace:*",
@@ -302,6 +311,8 @@
     "@bb/mongo": ["@bb/mongo@workspace:packages/mongo"],
 
     "@bb/neo4j": ["@bb/neo4j@workspace:packages/neo4j"],
+
+    "@bb/path-migration": ["@bb/path-migration@workspace:packages/path-migration"],
 
     "@bb/queue": ["@bb/queue@workspace:packages/queue"],
 
