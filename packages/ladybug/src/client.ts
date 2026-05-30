@@ -148,6 +148,41 @@ async function ensureSchema(c: Connection): Promise<void> {
     `CREATE NODE TABLE Module (
       name STRING PRIMARY KEY
     )`,
+    `CREATE NODE TABLE Concept (
+      id STRING PRIMARY KEY,
+      orgId STRING,
+      knowledgeId STRING,
+      slug STRING,
+      kind STRING,
+      name STRING,
+      rationale STRING,
+      enrichmentRunId STRING,
+      createdAt STRING,
+      updatedAt STRING
+    )`,
+    `CREATE NODE TABLE Contract (
+      id STRING PRIMARY KEY,
+      orgId STRING,
+      knowledgeId STRING,
+      slug STRING,
+      kind STRING,
+      name STRING,
+      enrichmentRunId STRING,
+      createdAt STRING,
+      updatedAt STRING
+    )`,
+    `CREATE NODE TABLE Guidepost (
+      id STRING PRIMARY KEY,
+      orgId STRING,
+      knowledgeId STRING,
+      slug STRING,
+      kind STRING,
+      note STRING,
+      area STRING,
+      enrichmentRunId STRING,
+      createdAt STRING,
+      updatedAt STRING
+    )`,
   ];
 
   const relTables = [
@@ -160,6 +195,13 @@ async function ensureSchema(c: Connection): Promise<void> {
     `CREATE REL TABLE HAS_IMPORT_INTERNAL (FROM File TO Module)`,
     `CREATE REL TABLE HAS_IMPORT_EXTERNAL (FROM File TO Module)`,
     `CREATE REL TABLE HAS_VERSION (FROM File TO FileVersion)`,
+    `CREATE REL TABLE HAS_CONCEPT (FROM File TO Concept, enrichmentRunId STRING, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE PLAYS_ROLE (FROM File TO Concept, enrichmentRunId STRING, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE BELONGS_TO_DOMAIN (FROM File TO Concept, enrichmentRunId STRING, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE TESTS (FROM File TO File, enrichmentRunId STRING, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE DEFINES (FROM File TO Contract, enrichmentRunId STRING, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE CONSUMES (FROM File TO Contract, enrichmentRunId STRING, createdAt STRING, updatedAt STRING)`,
+    `CREATE REL TABLE ABOUT (FROM Guidepost TO File, FROM Guidepost TO Concept, FROM Guidepost TO Contract, enrichmentRunId STRING, createdAt STRING, updatedAt STRING)`,
   ];
 
   for (const q of [...nodeTables, ...relTables]) {

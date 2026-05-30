@@ -48,7 +48,10 @@ export const knowledgeGraph: IGraphKnowledgeRepository = {
   deleteKnowledgeGraph: (...args) => getGraph().knowledge.deleteKnowledgeGraph(...args),
 };
 
-export const filesGraph: IGraphFileRepository = {
+// The facade always provides batch + bulk paths (with a per-item fallback when
+// the active provider omits them), so they are non-optional here even though
+// `IGraphFileRepository` marks them optional for provider implementors.
+export const filesGraph: Required<IGraphFileRepository> = {
   upsertFileNode: (...args) => getGraph().files.upsertFileNode(...args),
   deleteFileNodes: (...args) => getGraph().files.deleteFileNodes(...args),
   snapshotFilesToVersion: (...args) => getGraph().files.snapshotFilesToVersion(...args),
