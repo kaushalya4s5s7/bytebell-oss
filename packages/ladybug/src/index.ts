@@ -6,6 +6,11 @@ export type { PingResult } from "./client.ts";
 
 export { ensureKnowledgeIndexes } from "./indexes.ts";
 export { ensureFlatFolderIndexes } from "./flatFolderIndexes.ts";
+export { ensureConceptGraphIndexes } from "./conceptGraphIndexes.ts";
+
+export { upsertConcept, attachFileToConcept, upsertTestsEdge } from "./concepts.ts";
+export { upsertContract, attachFileToContract } from "./contracts.ts";
+export { upsertGuidepost, attachGuidepost } from "./guideposts.ts";
 
 export {
   upsertKnowledgeNode,

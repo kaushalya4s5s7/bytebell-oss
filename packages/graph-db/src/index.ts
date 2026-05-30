@@ -6,6 +6,9 @@ import type {
   IGraphRepoRepository,
   IGraphIndexRepository,
   IGraphSearchRepository,
+  IGraphConceptRepository,
+  IGraphContractRepository,
+  IGraphGuidepostRepository,
   GraphPingResult,
 } from "@bb/graph-core";
 
@@ -46,7 +49,10 @@ export const knowledgeGraph: IGraphKnowledgeRepository = {
   deleteKnowledgeGraph: (...args) => getGraph().knowledge.deleteKnowledgeGraph(...args),
 };
 
-export const filesGraph: IGraphFileRepository = {
+// The facade always provides batch + bulk paths (with a per-item fallback when
+// the active provider omits them), so they are non-optional here even though
+// `IGraphFileRepository` marks them optional for provider implementors.
+export const filesGraph: Required<IGraphFileRepository> = {
   upsertFileNode: (...args) => getGraph().files.upsertFileNode(...args),
   deleteFileNodes: (...args) => getGraph().files.deleteFileNodes(...args),
   snapshotFilesToVersion: (...args) => getGraph().files.snapshotFilesToVersion(...args),
@@ -92,6 +98,23 @@ export const repoGraph: IGraphRepoRepository = {
 export const indexesGraph: IGraphIndexRepository = {
   ensureKnowledgeIndexes: (...args) => getGraph().indexes.ensureKnowledgeIndexes(...args),
   ensureFlatFolderIndexes: (...args) => getGraph().indexes.ensureFlatFolderIndexes(...args),
+  ensureConceptGraphIndexes: (...args) => getGraph().indexes.ensureConceptGraphIndexes(...args),
+};
+
+export const conceptsGraph: IGraphConceptRepository = {
+  upsertConcept: (...args) => getGraph().concepts.upsertConcept(...args),
+  attachFileToConcept: (...args) => getGraph().concepts.attachFileToConcept(...args),
+  upsertTestsEdge: (...args) => getGraph().concepts.upsertTestsEdge(...args),
+};
+
+export const contractsGraph: IGraphContractRepository = {
+  upsertContract: (...args) => getGraph().contracts.upsertContract(...args),
+  attachFileToContract: (...args) => getGraph().contracts.attachFileToContract(...args),
+};
+
+export const guidepostsGraph: IGraphGuidepostRepository = {
+  upsertGuidepost: (...args) => getGraph().guideposts.upsertGuidepost(...args),
+  attachGuidepost: (...args) => getGraph().guideposts.attachGuidepost(...args),
 };
 
 export const searchGraph: IGraphSearchRepository = {

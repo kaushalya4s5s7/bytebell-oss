@@ -10,6 +10,13 @@ interface RowShape {
 
 interface CypherParams extends Record<string, unknown> {
   knowledgeId: string | null;
+  /**
+   * Allowlist of knowledge IDs to constrain results to. When set, intersects
+   * with `knowledgeId` if that's also set. When both are null, the search is
+   * unscoped (cross-repo). Used by ConceptGraphStrategy enrichment to query
+   * its own in-flight knowledge plus any cross-repo neighbours.
+   */
+  knowledgeIds: string[] | null;
   pathPrefix: string | null;
   queryTerms: string[];
   fulltextQuery: string;
@@ -25,6 +32,7 @@ const EXCLUSION_WHERE = `
 
 const SHARED_FILE_FILTERS = `
   ($knowledgeId IS NULL OR f.knowledgeId = $knowledgeId)
+  AND ($knowledgeIds IS NULL OR f.knowledgeId IN $knowledgeIds)
   AND ($pathPrefix IS NULL OR f.relativePath STARTS WITH $pathPrefix)
 ${EXCLUSION_WHERE}`;
 
@@ -35,6 +43,7 @@ RETURN f.relativePath AS path, f.knowledgeId AS knowledgeId, score
 function toCypherParams(input: SmartSearchChannelInput): CypherParams {
   return {
     knowledgeId: input.knowledgeId,
+    knowledgeIds: input.knowledgeIds === null ? null : [...input.knowledgeIds],
     pathPrefix: input.pathPrefix,
     queryTerms: [...input.queryTerms],
     fulltextQuery: buildFulltextQuery(input.queryTerms),

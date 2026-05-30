@@ -12,7 +12,10 @@ Implementation of `@bb/ladybug`. See [../README.md](../README.md) for the packag
 - **[folder.ts](folder.ts)** — Manages folder node upserting.
 - **[repo.ts](repo.ts)** — Manages repository node upserting.
 - **[knowledge.ts](knowledge.ts)** — Manages knowledge metadata, branch state, and asynchronous sweeping of orphan entity nodes (`vacuumOrphanEntities`).
-- **[indexes.ts](indexes.ts)** & **[flatFolderIndexes.ts](flatFolderIndexes.ts)** — No-op files satisfying interface constraints (indexing is natively optimized in LadybugDB).
+- **[concepts.ts](concepts.ts)** — Concept-graph `:Concept` upserts plus the `HAS_CONCEPT` / `PLAYS_ROLE` / `BELONGS_TO_DOMAIN` file edges and the file-to-file `:TESTS` edge.
+- **[contracts.ts](contracts.ts)** — `:Contract` upserts plus the `DEFINES` / `CONSUMES` file edges.
+- **[guideposts.ts](guideposts.ts)** — `:Guidepost` upserts plus the polymorphic `ABOUT` edge to a file, concept, or contract.
+- **[indexes.ts](indexes.ts)**, **[flatFolderIndexes.ts](flatFolderIndexes.ts)** & **[conceptGraphIndexes.ts](conceptGraphIndexes.ts)** — No-op files satisfying interface constraints (indexing is natively optimized in LadybugDB).
 
 ## Invariants
 

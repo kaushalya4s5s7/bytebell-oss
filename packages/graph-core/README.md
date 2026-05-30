@@ -13,11 +13,13 @@ Defines the contract that every graph database backend (Neo4j, etc.) must implem
 - `IGraphFileRepository` — file node upsert, delete, version snapshot
 - `IGraphFolderRepository` — folder node upsert
 - `IGraphRepoRepository` — repo node upsert
-- `IGraphIndexRepository` — index creation
+- `IGraphIndexRepository` — index creation (`ensureKnowledgeIndexes`, `ensureFlatFolderIndexes`, `ensureConceptGraphIndexes`)
 - `IGraphSearchRepository` — read-side queries used by MCP (smart-search channels, keyword lookup, knowledge listing, file metadata, repo-name hydration). Lets MCP stay provider-agnostic — each backend owns its own query dialect.
+- `IGraphConceptRepository` — `:Concept` node + concept-attaching edges (`HAS_CONCEPT` / `PLAYS_ROLE` / `BELONGS_TO_DOMAIN`) + file-to-file `:TESTS` edge. Used by ConceptGraphStrategy enrichment.
+- `IGraphContractRepository` — `:Contract` node + `DEFINES` / `CONSUMES` edges
+- `IGraphGuidepostRepository` — `:Guidepost` node + polymorphic `ABOUT` edge
 - `GraphPingResult` — health probe result shape
-- Input types: `NodeScope`, `UpsertFileNodeInput`, `UpsertFolderNodeInput`, `UpsertRepoNodeInput`, `SnapshotFilesInput`, and summary payload types
-- Search types: `SmartSearchChannel`, `SmartSearchChannelInput`, `ScoredHit`, `KeywordLookupInput`, `KeywordLookupMatch`, `KeywordLookupRow`, `KnowledgeListRow`, `FileMetadataRow`, `RepoNameRow`
+- Input types: `NodeScope`, `UpsertFileNodeInput`, `UpsertFolderNodeInput`, `UpsertRepoNodeInput`, `SnapshotFilesInput`, summary payload types, and concept-graph inputs (`UpsertConceptInput`, `AttachFileToConceptInput`, `UpsertContractInput`, `AttachFileToContractInput`, `UpsertGuidepostInput`, `AttachGuidepostInput`, `UpsertTestsEdgeInput`)
 
 ## Data Ownership
 

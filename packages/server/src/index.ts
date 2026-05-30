@@ -17,6 +17,7 @@ import { registerGithubWorkers, registerLocalIngestWorker } from "@bb/ingest-git
 import { ServerConfigError } from "@bb/errors";
 import { registerRoutes } from "./routes.ts";
 import { installShutdownHandlers } from "./shutdown.ts";
+import { reconcileLegacyLayout } from "./legacyLayout.ts";
 
 const REQUIRED: ConfigEnum[] = [
   Config.MongoUri,
@@ -56,12 +57,16 @@ async function main(): Promise<void> {
   checkRequiredConfig();
   const dbProvider = getConfigValue(Config.DbProvider);
   await connectDb(dbProvider);
+  // Self-heal the legacy on-disk layout: migrate what has a DB record, drop
+  // orphans that don't. Needs the DB connection, so it runs after connectDb.
+  await reconcileLegacyLayout();
 
   await connectRedis();
 
   const graphProvider = getConfigValue(Config.GraphProvider);
   await connectGraph(graphProvider);
   await indexesGraph.ensureKnowledgeIndexes();
+  await indexesGraph.ensureConceptGraphIndexes();
   await connectQueue();
   registerGithubWorkers();
   registerLocalIngestWorker();

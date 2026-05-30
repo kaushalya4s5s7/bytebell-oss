@@ -30,8 +30,20 @@ The package owns:
   request — `upsertKnowledge` + `upsertKnowledgeNode` run before the
   publisher transitions state to `QUEUED`.
 - Filtered recursive copy for local ingest (`copyRepo.ts`) — files end
-  up at `~/.bytebell/repos/<knowledgeId>/` regardless of source so MCP
-  retrieval can read them later.
+  up at `~/.bytebell/local-snapshots/<knowledgeId>/` (separate from the
+  commit-scoped `orgs/` tree where analysed artifacts live). The
+  snapshot freezes the user-supplied directory at submission time so
+  edits made during the worker run don't bleed into ingestion. MCP
+  retrieval for local knowledges reads through `source.sourcePath` on
+  the `KnowledgeDoc`, not the snapshot.
+- **Boot-time layout reconciliation** (`reconcileLegacyLayout`, [src/legacyLayout.ts](src/legacyLayout.ts)) —
+  runs after `connectDb` (it needs the knowledge list). Delegates to
+  `@bb/path-migration`: migrates every knowledge with a DB record into the
+  commit-scoped layout, and **deletes legacy dirs that have no DB record**
+  (logged to stderr as `legacy-layout abandoned …`) so a DB reset can't
+  permanently block boot. Only throws `LayoutMigrationRequiredError` if legacy
+  dirs remain that back a live knowledge but can't be migrated (missing
+  `commitId` / `repoUrl`) — those carry data the server won't silently destroy.
 - Graceful shutdown — SIGTERM/SIGINT → drain MCP sessions
   (`closeAllMcpSessions`) → close queue → close redis → close neo4j →
   close mongo → unlink `~/.bytebell/pid` → exit. MCP sessions drain
@@ -82,9 +94,12 @@ POST /sse/messages?sessionId=…             legacy SSE messages — owned by @b
 
 - `~/.bytebell/pid` — written at boot (mode `0644`), removed on graceful
   shutdown. Stale PID file is the signal that an earlier run crashed.
-- `~/.bytebell/repos/<knowledgeId>/` — populated for both github (via
-  worker's `gitClone`) and local-ingest (via this package's
-  `copyRepo`). Persisted across job retries; never auto-deleted.
+- `~/.bytebell/local-snapshots/<knowledgeId>/` — populated by the
+  local-ingest route's `copyRepo`. Frozen snapshot of the user's
+  uploaded directory at submission time. Persisted across job retries;
+  never auto-deleted. GitHub ingestion does not use this dir — it
+  clones directly into the commit-scoped `orgs/<orgId>/github/<knowledgeId>/<owner>/<repo>/<commit>/repository/`
+  tree (owned by `@bb/ingest-github`).
 
 ## Invariants
 
@@ -103,10 +118,20 @@ POST /sse/messages?sessionId=…             legacy SSE messages — owned by @b
    3a. **Neo4j schema bootstrap runs once at boot.** `ensureKnowledgeIndexes`
    creates uniqueness constraints for `:Knowledge / :File / :Keyword /
 :Class / :Function / :Module`; tolerant of existing indexes.
-4. **Local ingest copies into `repos/`, not in-place.** The user's
-   `sourcePath` is read-only; the canonical home for ingested files is
-   `~/.bytebell/repos/<knowledgeId>/`. Future MCP retrieval reads from
-   there.
+4. **Local ingest copies into `local-snapshots/`, not in-place.** The
+   user's `sourcePath` is read-only; the snapshot at
+   `~/.bytebell/local-snapshots/<knowledgeId>/` freezes the tree the
+   worker sees. MCP retrieval for local knowledges reads from
+   `KnowledgeDoc.source.sourcePath` (the original, unfrozen path) —
+   the snapshot exists purely to give the worker a stable input.
+   4a. **Legacy layout is reconciled automatically at boot.** After `connectDb`,
+   the server runs `reconcileLegacyLayout` (`@bb/path-migration`): legacy
+   `repos/.meta/` + `repos/<id>/` dirs with a DB record are migrated to the
+   commit-scoped `orgs/` tree; dirs with no DB record are deleted and logged as
+   abandoned. Boot only throws `LayoutMigrationRequiredError` (non-zero exit)
+   when legacy dirs remain that back a live knowledge but can't be migrated
+   (missing `commitId` / `repoUrl`); `bytebell migrate paths` runs the same
+   reconciliation ahead of time or with `--dry-run`.
 5. **Filtered copy uses the same SKIP lists as `scan.ts`.** Lists are
    duplicated (small, stable) rather than imported across the
    infra/domain boundary.

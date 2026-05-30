@@ -13,6 +13,7 @@ Maintains a map of named graph providers, exposes a single `getGraph()` accessor
 - `closeGraph()` — close the active provider
 - `getGraph()` — returns the active `IGraphDatabaseProvider`
 - `knowledgeGraph`, `filesGraph`, `foldersGraph`, `repoGraph`, `indexesGraph` — write/CRUD facade objects proxying to `getGraph()`
+- `conceptsGraph`, `contractsGraph`, `guidepostsGraph` — concept-graph (ConceptGraphStrategy) facade objects for `:Concept` / `:Contract` / `:Guidepost` writes
 - `searchGraph` — read-side facade exposing `IGraphSearchRepository` (smart-search channels, keyword lookup, knowledge list, file metadata, repo-name hydration). Consumed by `@bb/mcp` to keep its tools provider-agnostic.
 - `pingGraph()`, `runCypher()`, `toNeo4jInt()` — utility accessors
 

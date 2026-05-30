@@ -9,6 +9,13 @@ import type {
   SnapshotFilesInput,
   UpsertFileNodeInput,
   GraphPingResult,
+  UpsertConceptInput,
+  AttachFileToConceptInput,
+  UpsertContractInput,
+  AttachFileToContractInput,
+  UpsertGuidepostInput,
+  AttachGuidepostInput,
+  UpsertTestsEdgeInput,
 } from "@bb/types";
 
 export type {
@@ -20,6 +27,13 @@ export type {
   SnapshotFilesInput,
   UpsertFileNodeInput,
   GraphPingResult,
+  UpsertConceptInput,
+  AttachFileToConceptInput,
+  UpsertContractInput,
+  AttachFileToContractInput,
+  UpsertGuidepostInput,
+  AttachGuidepostInput,
+  UpsertTestsEdgeInput,
 };
 
 export interface IGraphKnowledgeRepository {
@@ -49,6 +63,30 @@ export interface IGraphRepoRepository {
 export interface IGraphIndexRepository {
   ensureKnowledgeIndexes(): Promise<void>;
   ensureFlatFolderIndexes(): Promise<void>;
+  ensureConceptGraphIndexes(): Promise<void>;
+}
+
+/**
+ * Concept-graph hypergraph writes — `:Concept` nodes plus the file-to-concept
+ * edges (`HAS_CONCEPT` / `PLAYS_ROLE` / `BELONGS_TO_DOMAIN`) and the file-to-
+ * file `:TESTS` edge. All canonical keys are scoped by `(orgId, knowledgeId)`.
+ */
+export interface IGraphConceptRepository {
+  upsertConcept(input: UpsertConceptInput): Promise<void>;
+  attachFileToConcept(input: AttachFileToConceptInput): Promise<void>;
+  upsertTestsEdge(input: UpsertTestsEdgeInput): Promise<void>;
+}
+
+/** `:Contract` nodes + `DEFINES` / `CONSUMES` edges. */
+export interface IGraphContractRepository {
+  upsertContract(input: UpsertContractInput): Promise<void>;
+  attachFileToContract(input: AttachFileToContractInput): Promise<void>;
+}
+
+/** `:Guidepost` nodes + polymorphic `ABOUT` edges. */
+export interface IGraphGuidepostRepository {
+  upsertGuidepost(input: UpsertGuidepostInput): Promise<void>;
+  attachGuidepost(input: AttachGuidepostInput): Promise<void>;
 }
 
 export type SmartSearchChannel =
@@ -63,6 +101,13 @@ export type SmartSearchChannel =
 
 export interface SmartSearchChannelInput {
   knowledgeId: string | null;
+  /**
+   * Allowlist of knowledge IDs to constrain results to. When set, intersects
+   * with `knowledgeId` if that's also set; when both are null the search is
+   * unscoped (cross-repo). Used by ConceptGraphStrategy enrichment to query
+   * its own in-flight knowledge plus opted-in cross-repo neighbours.
+   */
+  knowledgeIds: readonly string[] | null;
   pathPrefix: string | null;
   queryTerms: readonly string[];
   resultCap: number;
@@ -82,6 +127,11 @@ export interface KeywordLookupInput {
   match: KeywordLookupMatch;
   term: string;
   knowledgeId: string | null;
+  /**
+   * Allowlist of knowledge IDs to constrain results to. Intersects with
+   * `knowledgeId` when both are set; null on both means cross-repo.
+   */
+  knowledgeIds: readonly string[] | null;
   keywordLimit: number;
   filesPerKeyword: number;
 }
@@ -141,6 +191,9 @@ export interface IGraphDatabaseProvider {
   repo: IGraphRepoRepository;
   indexes: IGraphIndexRepository;
   search: IGraphSearchRepository;
+  concepts: IGraphConceptRepository;
+  contracts: IGraphContractRepository;
+  guideposts: IGraphGuidepostRepository;
 
   connect(): Promise<void>;
   close(): Promise<void>;
