@@ -60,6 +60,7 @@ export const configSchema = z
     graph_provider: z.string().default("neo4j"),
     queue_provider: z.string().default("bullmq"),
     sqlite_path: z.string().default(""),
+    ladybug_path: z.string().default(""),
     "ingestion.strategy": z.enum(INGESTION_STRATEGIES).default("flat-folder"),
     "enrichment.model": z.string().default(""),
     "enrichment.max.tool.calls.per.file": z.number().int().positive().default(15),
@@ -115,6 +116,7 @@ export type ConfigValueMap = {
   [Config.GraphProvider]: string;
   [Config.QueueProvider]: string;
   [Config.SqlitePath]: string;
+  [Config.LadybugPath]: string;
   [Config.IngestionStrategy]: IngestionStrategy;
   [Config.EnrichmentModel]: string;
   [Config.EnrichmentMaxToolCallsPerFile]: number;
@@ -184,6 +186,7 @@ export const HINTS: Readonly<Record<Config, string>> = {
   [Config.GraphProvider]: "bytebell set graph-provider <neo4j|...>",
   [Config.QueueProvider]: "bytebell set queue-provider <bullmq|honker>",
   [Config.SqlitePath]: "bytebell set sqlite-path <path>",
+  [Config.LadybugPath]: "bytebell set ladybug-path <path>",
   [Config.IngestionStrategy]: "bytebell set ingestion.strategy <flat-folder|concept-graph>",
   [Config.EnrichmentModel]: "bytebell set enrichment.model <model-id>",
   [Config.EnrichmentMaxToolCallsPerFile]: "bytebell set enrichment.max.tool.calls.per.file <n>",
