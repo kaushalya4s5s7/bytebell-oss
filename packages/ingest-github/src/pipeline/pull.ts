@@ -245,7 +245,7 @@ export async function runPull(
       String(totalCostUsd),
     );
     await transitionState(knowledgeId, KnowledgeState.Processed);
-    progressContext.completed("github_pull complete");
+    progressContext.completed();
     logger.info(
       `pull: ${knowledgeId} ${currentCommit.slice(0, 12)} -> ${targetCommit.slice(0, 12)} done (filesUpserted=${stored.filesUpserted} filesDeleted=${stored.filesDeleted} foldersUpserted=${stored.foldersUpserted})`,
     );

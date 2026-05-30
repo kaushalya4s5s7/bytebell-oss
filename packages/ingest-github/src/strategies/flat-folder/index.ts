@@ -171,7 +171,7 @@ export function createFlatFolderStrategy(deps: FlatFolderStrategyDeps): IngestSt
           progressContext,
         });
 
-        progressContext.completed();
+        progressContext.completed(phase7.filesWritten);
 
         return {
           filesAnalyzed:

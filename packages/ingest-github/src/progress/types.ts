@@ -39,7 +39,7 @@ export interface ProgressReporter {
 export interface ProgressContext {
   reporter(input: ProgressReporterInput): ProgressReporter;
   phaseChanged(phase: ProgressPhase): void;
-  completed(message?: string): void;
+  completed(filesWritten?: number, message?: string): void;
   /**
    * Emit a terminal FAILED event. `error` is a short operator-readable
    * sentence (e.g. "OpenRouter is out of credits"). `category` is the

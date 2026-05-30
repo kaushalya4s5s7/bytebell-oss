@@ -53,8 +53,9 @@ class DbProgressContext implements ProgressContext {
     }
   }
 
-  completed() {
-    knowledgeDb.updateKnowledgeProgress(this.knowledgeId, this.total, this.total).catch(() => {});
+  completed(filesWritten?: number) {
+    const count = filesWritten ?? this.total;
+    knowledgeDb.updateKnowledgeProgress(this.knowledgeId, count, count).catch(() => {});
   }
 
   failed() {}
