@@ -27,7 +27,7 @@
     "@bb/neo4j": "workspace:*",
     "@bb/ladybug": "workspace:*",
     "@bb/queue": "workspace:*",
-    "@bb/redis": "workspace:*",
+    "@bb/queue-bullmq": "workspace:*",
     "@bb/types": "workspace:*",
     "express": "^5.2.1"
   },

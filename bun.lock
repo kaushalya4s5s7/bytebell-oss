@@ -1,5 +1,6 @@
 {
   "lockfileVersion": 1,
+  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "bytebell-public",
@@ -113,7 +114,6 @@
         "@bb/ladybug": "workspace:*",
         "@bb/llm": "workspace:*",
         "@bb/logger": "workspace:*",
-        "@bb/mcp": "workspace:*",
         "@bb/mongo": "workspace:*",
         "@bb/neo4j": "workspace:*",
         "@bb/queue": "workspace:*",
@@ -164,11 +164,9 @@
       "version": "0.0.0",
       "dependencies": {
         "@bb/config": "workspace:*",
-        "@bb/errors": "workspace:*",
         "@bb/graph-db": "workspace:*",
         "@bb/llm": "workspace:*",
         "@bb/logger": "workspace:*",
-        "@bb/mongo": "workspace:*",
         "@bb/types": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.23.0",
         "zod": "^4.3.6",
@@ -216,10 +214,28 @@
         "@bb/config": "workspace:*",
         "@bb/db": "workspace:*",
         "@bb/errors": "workspace:*",
-        "@bb/mongo": "workspace:*",
+        "@bb/queue-core": "workspace:*",
+        "@bb/types": "workspace:*",
+      },
+    },
+    "packages/queue-bullmq": {
+      "name": "@bb/queue-bullmq",
+      "version": "0.0.0",
+      "dependencies": {
+        "@bb/config": "workspace:*",
+        "@bb/errors": "workspace:*",
+        "@bb/queue": "workspace:*",
+        "@bb/queue-core": "workspace:*",
         "@bb/redis": "workspace:*",
         "@bb/types": "workspace:*",
         "bullmq": "^5.76.3",
+      },
+    },
+    "packages/queue-core": {
+      "name": "@bb/queue-core",
+      "version": "0.0.0",
+      "dependencies": {
+        "@bb/types": "workspace:*",
       },
     },
     "packages/redis": {
@@ -250,7 +266,7 @@
         "@bb/neo4j": "workspace:*",
         "@bb/path-migration": "workspace:*",
         "@bb/queue": "workspace:*",
-        "@bb/redis": "workspace:*",
+        "@bb/queue-bullmq": "workspace:*",
         "@bb/sqlite": "workspace:*",
         "@bb/types": "workspace:*",
         "express": "^5.2.1",
@@ -318,6 +334,10 @@
     "@bb/path-migration": ["@bb/path-migration@workspace:packages/path-migration"],
 
     "@bb/queue": ["@bb/queue@workspace:packages/queue"],
+
+    "@bb/queue-bullmq": ["@bb/queue-bullmq@workspace:packages/queue-bullmq"],
+
+    "@bb/queue-core": ["@bb/queue-core@workspace:packages/queue-core"],
 
     "@bb/redis": ["@bb/redis@workspace:packages/redis"],
 
