@@ -38,6 +38,7 @@ export enum Config {
   DbProvider = "db_provider",
   GraphProvider = "graph_provider",
   QueueProvider = "queue_provider",
+  QueueDbPath = "queue_db_path",
   SqlitePath = "sqlite_path",
   LadybugPath = "ladybug_path",
   IngestionStrategy = "ingestion.strategy",

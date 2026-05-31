@@ -28,6 +28,7 @@
     "@bb/ladybug": "workspace:*",
     "@bb/queue": "workspace:*",
     "@bb/queue-bullmq": "workspace:*",
+    "@bb/queue-honker": "workspace:*",
     "@bb/types": "workspace:*",
     "express": "^5.2.1"
   },

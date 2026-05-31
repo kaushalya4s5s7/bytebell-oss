@@ -1,3 +1,7 @@
+// BullMQ-over-Redis implementation of `IQueueProvider`. Registers itself
+// as the "bullmq" provider at module load; the server picks it up via
+// `import "@bb/queue-bullmq"` (side effect) + `connectQueue("bullmq")`.
+
 import { Queue, Worker, type Job } from "bullmq";
 import { JobType, type JobMessage, type PayloadFor } from "@bb/types";
 import { QueueConnectError, QueueNotConnectedError } from "@bb/errors";
@@ -14,10 +18,15 @@ import type {
 } from "@bb/queue-core";
 import { dedupeKey, mapBullmqPriority } from "./priority.ts";
 
+// Distinct from the kube-package reference's `"kp"` so a shared dev Redis can
+// host both without key collisions.
 const QUEUE_PREFIX = "bb";
 
 const ALL_JOB_TYPES: readonly JobType[] = [JobType.GithubIndex, JobType.GithubPull, JobType.LocalIngest];
 
+// Retain failed jobs (`removeOnFail: false`) so `listFailedJobs()` can surface
+// them; drop completed jobs to keep Redis small. BullMQ tracks attempts
+// internally — workers don't need to.
 const DEFAULT_JOB_OPTIONS = {
   removeOnComplete: true,
   removeOnFail: false,
@@ -30,8 +39,15 @@ class BullmqQueueProvider implements IQueueProvider {
   private workers: Worker[] = [];
 
   async connect(): Promise<void> {
+    // The provider owns its substrate lifecycle (mirroring `@bb/sqlite`
+    // owning `connectSqlite`). The server's `main()` no longer calls
+    // `connectRedis()` directly.
     await connectRedis();
     try {
+      // One `Queue` per job type. BullMQ spawns its own internal ioredis
+      // client per Queue from the options blob (see §10.3 of
+      // `docs/redis-and-queue.md`), so the connection object is shared
+      // shape, not a shared connection.
       const connection = getRedisConnection();
       for (const type of ALL_JOB_TYPES) {
         const queue = new Queue(type, {
@@ -48,6 +64,9 @@ class BullmqQueueProvider implements IQueueProvider {
   }
 
   async close(): Promise<void> {
+    // Workers first so in-flight handlers finish before BullMQ's internal
+    // Redis connections drop. Reversing this order would corrupt active
+    // jobs (BLPOP commands would error mid-claim).
     const ws = this.workers.splice(0);
     await Promise.all(ws.map((w) => w.close()));
     const qs = Array.from(this.queues.values());
@@ -66,6 +85,9 @@ class BullmqQueueProvider implements IQueueProvider {
     opts: NormalizedEnqueueOptions,
   ): Promise<string> {
     const queue = this.requireQueue(type);
+    // Stable `jobId` is the load-bearing dedupe primitive: BullMQ silently
+    // drops a second `queue.add(...)` with the same id, so re-publishing
+    // the same `(type, knowledgeId)` is a no-op.
     const jobId = dedupeKey(type, message.knowledgeId);
     await queue.add(type, message, {
       jobId,
@@ -100,6 +122,7 @@ class BullmqQueueProvider implements IQueueProvider {
       if (queue === undefined) {
         continue;
       }
+      // The dedupe key is deterministic — direct lookup, no scan.
       const jobId = dedupeKey(type, knowledgeId);
       const job = await queue.getJob(jobId);
       if (job === undefined || job === null) {
@@ -109,7 +132,8 @@ class BullmqQueueProvider implements IQueueProvider {
         await job.remove();
         removed += 1;
       } catch {
-        // active jobs cannot be removed; leave them to finish naturally
+        // BullMQ throws when removing an `active` job — the worker holds it.
+        // Leave it; the handler is idempotent and will finish naturally.
       }
     }
     return { removed };

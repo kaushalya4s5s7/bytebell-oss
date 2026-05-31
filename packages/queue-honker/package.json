@@ -1,5 +1,5 @@
 {
-  "name": "@bb/queue",
+  "name": "@bb/queue-honker",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -13,10 +13,11 @@
   },
   "dependencies": {
     "@bb/config": "workspace:*",
-    "@bb/db": "workspace:*",
     "@bb/errors": "workspace:*",
     "@bb/logger": "workspace:*",
+    "@bb/queue": "workspace:*",
     "@bb/queue-core": "workspace:*",
-    "@bb/types": "workspace:*"
+    "@bb/types": "workspace:*",
+    "@russellthehippo/honker-node": "^0.3.3"
   }
 }

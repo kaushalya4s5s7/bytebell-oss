@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "bytebell-public",
@@ -114,6 +113,7 @@
         "@bb/ladybug": "workspace:*",
         "@bb/llm": "workspace:*",
         "@bb/logger": "workspace:*",
+        "@bb/mcp": "workspace:*",
         "@bb/mongo": "workspace:*",
         "@bb/neo4j": "workspace:*",
         "@bb/queue": "workspace:*",
@@ -164,9 +164,11 @@
       "version": "0.0.0",
       "dependencies": {
         "@bb/config": "workspace:*",
+        "@bb/errors": "workspace:*",
         "@bb/graph-db": "workspace:*",
         "@bb/llm": "workspace:*",
         "@bb/logger": "workspace:*",
+        "@bb/mongo": "workspace:*",
         "@bb/types": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.23.0",
         "zod": "^4.3.6",
@@ -214,6 +216,7 @@
         "@bb/config": "workspace:*",
         "@bb/db": "workspace:*",
         "@bb/errors": "workspace:*",
+        "@bb/logger": "workspace:*",
         "@bb/queue-core": "workspace:*",
         "@bb/types": "workspace:*",
       },
@@ -236,6 +239,19 @@
       "version": "0.0.0",
       "dependencies": {
         "@bb/types": "workspace:*",
+      },
+    },
+    "packages/queue-honker": {
+      "name": "@bb/queue-honker",
+      "version": "0.0.0",
+      "dependencies": {
+        "@bb/config": "workspace:*",
+        "@bb/errors": "workspace:*",
+        "@bb/logger": "workspace:*",
+        "@bb/queue": "workspace:*",
+        "@bb/queue-core": "workspace:*",
+        "@bb/types": "workspace:*",
+        "@russellthehippo/honker-node": "^0.3.3",
       },
     },
     "packages/redis": {
@@ -267,6 +283,7 @@
         "@bb/path-migration": "workspace:*",
         "@bb/queue": "workspace:*",
         "@bb/queue-bullmq": "workspace:*",
+        "@bb/queue-honker": "workspace:*",
         "@bb/sqlite": "workspace:*",
         "@bb/types": "workspace:*",
         "express": "^5.2.1",
@@ -338,6 +355,8 @@
     "@bb/queue-bullmq": ["@bb/queue-bullmq@workspace:packages/queue-bullmq"],
 
     "@bb/queue-core": ["@bb/queue-core@workspace:packages/queue-core"],
+
+    "@bb/queue-honker": ["@bb/queue-honker@workspace:packages/queue-honker"],
 
     "@bb/redis": ["@bb/redis@workspace:packages/redis"],
 
@@ -448,6 +467,16 @@
     "@msgpackr-extract/msgpackr-extract-win32-x64": ["@msgpackr-extract/msgpackr-extract-win32-x64@3.0.3", "", { "os": "win32", "cpu": "x64" }, "sha512-x0fWaQtYp4E6sktbsdAqnehxDgEc/VwM7uLsRCYWaiGu0ykYdZPiS8zCWdnjHwyiumousxfBm4SO31eXqwEZhQ=="],
 
     "@pkgr/core": ["@pkgr/core@0.2.9", "", {}, "sha512-QNqXyfVS2wm9hweSYD2O7F0G06uurj9kZ96TRQE5Y9hU7+tgdZwIkbAKc5Ocy1HxEY2kuDQa6cQ1WRs/O5LFKA=="],
+
+    "@russellthehippo/honker-node": ["@russellthehippo/honker-node@0.3.3", "", { "optionalDependencies": { "@russellthehippo/honker-node-darwin-arm64": "0.3.3", "@russellthehippo/honker-node-darwin-x64": "0.3.3", "@russellthehippo/honker-node-linux-arm64-gnu": "0.3.3", "@russellthehippo/honker-node-linux-x64-gnu": "0.3.3" } }, "sha512-MwC5gfn3o0FmOU429B5vp1ltDuPnGEtqLE5EfZGpi1VO3HQr7TbFZM08OepyjwNxYFY0tb0DXTOvD484EDFGCA=="],
+
+    "@russellthehippo/honker-node-darwin-arm64": ["@russellthehippo/honker-node-darwin-arm64@0.3.3", "", { "os": "darwin", "cpu": "arm64" }, "sha512-VdzCHb6+XVEw9z4VIdjZ338lWzYAzugLPNZbKsDChxXNt7z93S9fj5g8cqUOAZIzZ9e80InRyJ+IrTrQn+xmiQ=="],
+
+    "@russellthehippo/honker-node-darwin-x64": ["@russellthehippo/honker-node-darwin-x64@0.3.3", "", { "os": "darwin", "cpu": "x64" }, "sha512-EK00+y+xoT/2QYg1jK7wjMGL9SHm+2+y7guuDf0d3C4qMfkL22mk/wtuKNyayLv2leE0allw8xSKybjPPucGUA=="],
+
+    "@russellthehippo/honker-node-linux-arm64-gnu": ["@russellthehippo/honker-node-linux-arm64-gnu@0.3.3", "", { "os": "linux", "cpu": "arm64" }, "sha512-6vVNRqVIB2iZzngQD8/6ZZu3h/ARh9i6TAHfWzaz7sFL4KqzG4J0F5T0qnUbRrK8keuLaHOap1bnPphT4OPzlQ=="],
+
+    "@russellthehippo/honker-node-linux-x64-gnu": ["@russellthehippo/honker-node-linux-x64-gnu@0.3.3", "", { "os": "linux", "cpu": "x64" }, "sha512-UGdImgM2ZN1k3kJ/TKiCvcHrwgMnMn2U+Ktx4VTc7/b89oXiA1CZr1YWO25mtz2KKhRIfk9YhZLXFL5B8a7GaQ=="],
 
     "@simple-libs/child-process-utils": ["@simple-libs/child-process-utils@1.0.2", "", { "dependencies": { "@simple-libs/stream-utils": "^1.2.0" } }, "sha512-/4R8QKnd/8agJynkNdJmNw2MBxuFTRcNFnE5Sg/G+jkSsV8/UBgULMzhizWWW42p8L5H7flImV2ATi79Ove2Tw=="],
 
